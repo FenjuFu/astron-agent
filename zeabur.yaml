@@ -26,16 +26,36 @@ spec:
       description: The domain for the Casdoor authentication service (used for OAuth2 login).
     - key: PLATFORM_APP_ID
       type: STRING
-      name: iFLYTEK Platform App ID
-      description: App ID from the iFLYTEK Open Platform (https://console.xfyun.cn). Required for AI capabilities.
+      name: Platform App ID
+      description: App ID for the AI platform (e.g., iFLYTEK). Leave empty if not using iFLYTEK.
     - key: PLATFORM_API_KEY
       type: STRING
-      name: iFLYTEK Platform API Key
-      description: API Key from the iFLYTEK Open Platform (https://console.xfyun.cn).
+      name: Platform API Key
+      description: API Key for the AI platform.
     - key: PLATFORM_API_SECRET
       type: STRING
-      name: iFLYTEK Platform API Secret
-      description: API Secret from the iFLYTEK Open Platform (https://console.xfyun.cn).
+      name: Platform API Secret
+      description: API Secret for the AI platform.
+    - key: SPARK_API_PASSWORD
+      type: STRING
+      name: Spark API Password
+      description: Password for Spark API (if applicable).
+    - key: SPARK_RTASR_API_KEY
+      type: STRING
+      name: Spark RTASR API Key
+      description: API Key for Spark Real-time ASR (if applicable).
+    - key: AI_ABILITY_CHAT_BASE_URL
+      type: STRING
+      name: AI Chat Base URL
+      description: Base URL for AI Chat capabilities (OpenAI compatible).
+    - key: AI_ABILITY_CHAT_MODEL
+      type: STRING
+      name: AI Chat Model
+      description: Model ID for AI Chat capabilities.
+    - key: AI_ABILITY_CHAT_API_KEY
+      type: STRING
+      name: AI Chat API Key
+      description: API Key for AI Chat capabilities.
   readme: |-
     # Astron Agent
 
@@ -46,15 +66,14 @@ spec:
     ## Prerequisites
 
     Before deploying, you need:
-    1. Register an account at [iFLYTEK Open Platform](https://console.xfyun.cn) and obtain:
-       - App ID (PLATFORM_APP_ID)
-       - API Key (PLATFORM_API_KEY)
-       - API Secret (PLATFORM_API_SECRET)
+    1. Configure your AI platform credentials. You can use iFLYTEK or other OpenAI-compatible providers.
+       - For iFLYTEK: PLATFORM_APP_ID, PLATFORM_API_KEY, PLATFORM_API_SECRET
+       - For generic OpenAI compatible services: AI_ABILITY_CHAT_BASE_URL, AI_ABILITY_CHAT_MODEL, AI_ABILITY_CHAT_API_KEY
     2. Two domains: one for the main application and one for Casdoor authentication.
 
     ## Deployment Steps
 
-    1. Fill in your iFLYTEK Platform credentials.
+    1. Fill in your AI Platform credentials in the variables section.
     2. Bind two domains: one for the main application (nginx) and one for Casdoor authentication.
     3. After deployment, access Casdoor at your Casdoor domain.
        - Default credentials: username `admin`, password `123`
@@ -1693,21 +1712,23 @@ spec:
           PLATFORM_API_SECRET:
             default: ${PLATFORM_API_SECRET}
           AI_ABILITY_CHAT_BASE_URL:
-            default: https://spark-api-open.xf-yun.com/v1
+            default: ${AI_ABILITY_CHAT_BASE_URL}
           AI_ABILITY_CHAT_MODEL:
-            default: ""
+            default: ${AI_ABILITY_CHAT_MODEL}
           AI_ABILITY_CHAT_API_KEY:
-            default: ${PLATFORM_API_KEY}
+            default: ${AI_ABILITY_CHAT_API_KEY}
           SPARK_APP_ID:
             default: ${PLATFORM_APP_ID}
           SPARK_API_KEY:
             default: ${PLATFORM_API_KEY}
           SPARK_API_SECRET:
             default: ${PLATFORM_API_SECRET}
+          SPARK_API_PASSWORD:
+            default: ${SPARK_API_PASSWORD}
           SPARK_RTASR_APPID:
             default: ${PLATFORM_APP_ID}
           SPARK_RTASR_KEY:
-            default: ${PLATFORM_API_KEY}
+            default: ${SPARK_RTASR_API_KEY}
           SPARK_IMAGE_APP_ID:
             default: ${PLATFORM_APP_ID}
           SPARK_IMAGE_API_KEY:
@@ -1990,16 +2011,36 @@ localization:
         description: Casdoor 认证服务的域名（用于 OAuth2 登录）。
       - key: PLATFORM_APP_ID
         type: STRING
-        name: 讯飞开放平台 App ID
-        description: 讯飞开放平台（https://console.xfyun.cn）的 App ID，AI 能力必需。
+        name: 平台 App ID
+        description: AI 平台 App ID（如讯飞开放平台）。如果不使用讯飞，请留空。
       - key: PLATFORM_API_KEY
         type: STRING
-        name: 讯飞开放平台 API Key
-        description: 讯飞开放平台（https://console.xfyun.cn）的 API Key。
+        name: 平台 API Key
+        description: AI 平台 API Key。
       - key: PLATFORM_API_SECRET
         type: STRING
-        name: 讯飞开放平台 API Secret
-        description: 讯飞开放平台（https://console.xfyun.cn）的 API Secret。
+        name: 平台 API Secret
+        description: AI 平台 API Secret。
+      - key: SPARK_API_PASSWORD
+        type: STRING
+        name: 星火 API Password
+        description: 星火 API 密码（如适用）。
+      - key: SPARK_RTASR_API_KEY
+        type: STRING
+        name: 星火实时语音转写 API Key
+        description: 星火实时语音转写 API Key（如适用）。
+      - key: AI_ABILITY_CHAT_BASE_URL
+        type: STRING
+        name: AI 对话 Base URL
+        description: AI 对话能力 Base URL（兼容 OpenAI 协议）。
+      - key: AI_ABILITY_CHAT_MODEL
+        type: STRING
+        name: AI 对话模型
+        description: AI 对话能力模型 ID。
+      - key: AI_ABILITY_CHAT_API_KEY
+        type: STRING
+        name: AI 对话 API Key
+        description: AI 对话能力 API Key。
     readme: |-
       # Astron Agent
 
@@ -2009,15 +2050,14 @@ localization:
       ## 部署前准备
 
       部署前，您需要：
-      1. 在[讯飞开放平台](https://console.xfyun.cn)注册账号并获取：
-         - App ID（PLATFORM_APP_ID）
-         - API Key（PLATFORM_API_KEY）
-         - API Secret（PLATFORM_API_SECRET）
+      1. 配置您的 AI 平台凭证。您可以使用讯飞开放平台或其他兼容 OpenAI 协议的服务。
+         - 讯飞：PLATFORM_APP_ID, PLATFORM_API_KEY, PLATFORM_API_SECRET
+         - 通用 OpenAI 兼容服务：AI_ABILITY_CHAT_BASE_URL, AI_ABILITY_CHAT_MODEL, AI_ABILITY_CHAT_API_KEY
       2. 准备两个域名：一个用于主应用，一个用于 Casdoor 认证服务。
 
       ## 部署步骤
 
-      1. 填写讯飞开放平台凭证。
+      1. 在变量部分填写您的 AI 平台凭证。
       2. 绑定两个域名：一个用于主应用（nginx），一个用于 Casdoor 认证。
       3. 部署完成后，访问您的 Casdoor 域名。
          - 默认账号：用户名 `admin`，密码 `123`
