@@ -44,7 +44,7 @@ The platform supports **high-availability** deployment, enabling organizations t
 
 ## 🚀 Quick Start
 
-We offer two deployment methods to meet different scenarios:
+We offer three deployment methods to meet different scenarios:
 
 ### Option 1: Docker Compose (Recommended for Quick Start)
 
@@ -82,7 +82,21 @@ After startup, you can access the services at the following addresses:
 **Note**
 - Default Casdoor login credentials: username: `admin`, password: `123`
 
-### Option 2: Helm (For Kubernetes Environments)
+### Option 2: Zeabur (One-Click Cloud Deployment)
+
+Deploy Astron Agent instantly on [Zeabur](https://zeabur.com) with a single click:
+
+[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/ASTRONAGENT)
+
+**Before deploying**, you will need:
+1. An account on the [iFLYTEK Open Platform](https://console.xfyun.cn) to obtain your App ID, API Key, and API Secret.
+2. Two domains: one for the main application and one for the Casdoor authentication service.
+
+**After deploying**, access the services at:
+- **Application**: your main application domain
+- **Casdoor Auth**: your Casdoor domain (default credentials: `admin` / `123`)
+
+### Option 3: Helm (For Kubernetes Environments)
 
 > 🚧 **Note**: Helm charts are currently under development. Stay tuned for updates!
 

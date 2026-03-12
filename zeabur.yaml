@@ -1,0 +1,2032 @@
+# yaml-language-server: $schema=https://schema.zeabur.app/template.json
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: AstronAgent
+spec:
+  description: >-
+    Enterprise-grade open-source AI agent development platform that integrates AI workflow
+    orchestration, model management, MCP tool integration, RPA automation, and team collaboration.
+    Built by iFLYTEK.
+  icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+  coverImage: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/imgs/Astron_Readme.png
+  tags:
+    - AI
+    - Agent
+    - Workflow
+    - LLM
+  variables:
+    - key: PUBLIC_DOMAIN
+      type: DOMAIN
+      name: Application Domain
+      description: The domain for accessing the Astron Agent web application.
+    - key: CASDOOR_DOMAIN
+      type: DOMAIN
+      name: Casdoor Auth Domain
+      description: The domain for the Casdoor authentication service (used for OAuth2 login).
+    - key: PLATFORM_APP_ID
+      type: STRING
+      name: iFLYTEK Platform App ID
+      description: App ID from the iFLYTEK Open Platform (https://console.xfyun.cn). Required for AI capabilities.
+    - key: PLATFORM_API_KEY
+      type: STRING
+      name: iFLYTEK Platform API Key
+      description: API Key from the iFLYTEK Open Platform (https://console.xfyun.cn).
+    - key: PLATFORM_API_SECRET
+      type: STRING
+      name: iFLYTEK Platform API Secret
+      description: API Secret from the iFLYTEK Open Platform (https://console.xfyun.cn).
+  readme: |-
+    # Astron Agent
+
+    Astron Agent is an **enterprise-grade, commercial-friendly** open-source AI agent development platform
+    built by iFLYTEK. It integrates AI workflow orchestration, model management, AI and MCP tool integration,
+    RPA automation, and team collaboration into one platform.
+
+    ## Prerequisites
+
+    Before deploying, you need:
+    1. Register an account at [iFLYTEK Open Platform](https://console.xfyun.cn) and obtain:
+       - App ID (PLATFORM_APP_ID)
+       - API Key (PLATFORM_API_KEY)
+       - API Secret (PLATFORM_API_SECRET)
+    2. Two domains: one for the main application and one for Casdoor authentication.
+
+    ## Deployment Steps
+
+    1. Fill in your iFLYTEK Platform credentials.
+    2. Bind two domains: one for the main application (nginx) and one for Casdoor authentication.
+    3. After deployment, access Casdoor at your Casdoor domain.
+       - Default credentials: username `admin`, password `123`
+    4. Access the application at your main application domain.
+
+    ## Default Login
+
+    - **Casdoor Admin**: username `admin`, password `123` (change immediately after login)
+
+    ## License
+
+    Apache 2.0 — See [GitHub Repository](https://github.com/iflytek/astron-agent) for details.
+  resourceRequirement:
+    minConfig:
+      cpu: 4
+      ram: 8
+    recommendedConfig:
+      cpu: 8
+      ram: 16
+  services:
+    # ===========================================================================
+    # Infrastructure Services
+    # ===========================================================================
+
+    - name: postgresql
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/postgresql.svg
+      template: PREBUILT_V2
+      spec:
+        source:
+          image: postgres:14
+        ports:
+          - id: database
+            port: 5432
+            type: TCP
+        volumes:
+          - id: data
+            dir: /var/lib/postgresql/data
+        env:
+          POSTGRES_DB:
+            default: sparkdb_manager
+          POSTGRES_USER:
+            default: spark
+            expose: true
+          POSTGRES_PASSWORD:
+            default: ${PASSWORD}
+            expose: true
+          POSTGRES_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          POSTGRES_PORT:
+            default: ${DATABASE_PORT}
+            expose: true
+            readonly: true
+
+    - name: mysql
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/mysql.svg
+      template: PREBUILT_V2
+      spec:
+        source:
+          image: mysql:8.4.6
+        ports:
+          - id: database
+            port: 3306
+            type: TCP
+        volumes:
+          - id: data
+            dir: /var/lib/mysql
+        env:
+          MYSQL_ROOT_PASSWORD:
+            default: ${PASSWORD}
+            expose: true
+          MYSQL_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          MYSQL_PORT:
+            default: ${DATABASE_PORT}
+            expose: true
+            readonly: true
+        configs:
+          - path: /docker-entrypoint-initdb.d/01-console.sql
+            template: |-
+              SELECT 'astron_console DATABASE initialization started' AS '';
+              CREATE DATABASE IF NOT EXISTS astron_console;
+          - path: /docker-entrypoint-initdb.d/02-link.sql
+            template: |-
+              select 'spark-link DATABASE initialization started' as '';
+              CREATE DATABASE IF NOT EXISTS `spark-link`;
+              
+              USE spark-link;
+              
+              SET NAMES utf8mb4;
+              SET FOREIGN_KEY_CHECKS = 0;
+              
+              -- ----------------------------
+              -- Table structure for link
+              -- ----------------------------
+              
+              DROP TABLE IF EXISTS `tools_schema`;
+              CREATE TABLE tools_schema (
+                  `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+                  `app_id` VARCHAR(32) COMMENT '应用ID',
+                  `tool_id` VARCHAR(32) COMMENT '工具ID',
+                  `name` VARCHAR(128) COMMENT '工具名称',
+                  `description` VARCHAR(512) COMMENT '工具描述',
+                  `open_api_schema` TEXT COMMENT 'open api schema，json格式',
+                  `create_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
+                  `update_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
+                  `mcp_server_url` VARCHAR(255) COMMENT 'mcp_server_url',
+                  `schema` TEXT COMMENT 'schema,json格式',
+                  `version` VARCHAR(32) NOT NULL DEFAULT 'V1.0' COMMENT '版本号',
+                  `is_deleted` BIGINT NOT NULL DEFAULT 0 COMMENT '是否已删除',
+                  UNIQUE KEY unique_tool_version (tool_id, version, is_deleted)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工具数据库表';
+              
+              select 'spark-link DATABASE initialization completed' as '';
+              
+              -- ----------------------------
+              -- Add the official tools provided by the aitools component.
+              -- ----------------------------
+              INSERT INTO tools_schema (app_id, tool_id, name, description, open_api_schema, create_at, update_at)
+              VALUES (
+                'appid', -- app_id (VARCHAR(32))
+                'tool@8b2262bef821000', -- tool_id (VARCHAR(32))
+                '超拟人合成', -- name (VARCHAR(128))
+                '用户上传一段话，选择特色发音人，生成一段更拟人的语音', -- description (VARCHAR(512))
+                '{"info": {"title": "agentBuilder toolset", "version": "1.0.0", "x-is-official": false}, "openapi": "3.1.0", "paths": {"/aitools/v1/smarttts": {"post": {"description": "用户上传一段话，选择特色发音人，生成一段更拟人的语音", "operationId": "超拟人合成-46EXFdLW", "requestBody": {"content": {"application/json": {"schema": {"properties": {"vcn": {"default": "x5_lingfeiyi_flow", "description": "特色发音人，目前可选（x5_lingfeiyi_flow）", "type": "string", "x-display": true, "x-from": 2}, "text": {"description": "需要合成的文本", "type": "string", "x-display": true, "x-from": 2}, "speed": {"default": 50, "description": "语速：0对应默认语速的1/2，100对应默认语速的2倍; 默认值50", "type": "integer", "x-display": true, "x-from": 2}}, "required": ["vcn", "text", "speed"], "type": "object"}}}, "required": true}, "responses": {"200": {"content": {"application/json": {"schema": {"properties": {"code": {"description": "状态码", "type": "integer", "x-display": true}, "data": {"description": "结果", "properties": {"voice_url": {"description": "音频下载url", "type": "string", "x-display": true}}, "type": "object", "x-display": true}, "message": {"description": "操作消息", "type": "string", "x-display": true}, "sid": {"description": "会话id", "type": "string", "x-display": true}}, "type": "object"}}}, "description": "success"}}, "summary": "超拟人合成"}}}, "servers": [{"description": "a server description", "url": "http://core-aitools:18668"}]}', -- open_api_schema (TEXT)
+              	'2025-10-24 10:00:00', -- create_at (DATETIME)
+                '2025-10-24 10:00:00' -- update_at (DATETIME)
+              );
+              
+              INSERT INTO tools_schema (app_id, tool_id, name, description, open_api_schema, create_at, update_at)
+              VALUES (
+                'appid', -- app_id (VARCHAR(32))
+                'tool@8b226f7d7421000', -- tool_id (VARCHAR(32))
+                '文生图', -- name (VARCHAR(128))
+                '根据输入的内容生成与内容有关的图片', -- description (VARCHAR(512))
+                '{"info": {"title": "agentBuilder toolset", "version": "1.0.0", "x-is-official": false}, "openapi": "3.1.0", "paths": {"/aitools/v1/image_generate": {"post": {"description": "根据输入的内容生成与内容有关的图片", "operationId": "文生图-hrOgFpJ8", "requestBody": {"content": {"application/json": {"schema": {"properties": {"width": {"default": 1024, "description": "宽度分辨率，支持以下分辨率：512x512, 640x360, 640x480, 640x640, 680x512, 512x680, 768x768, 720x1280, 1280x720, 1024x1024", "type": "integer", "x-display": true, "x-from": 2}, "prompt": {"description": "图片描述信息", "type": "string", "x-display": true, "x-from": 2}, "height": {"default": 1024, "description": "高度分辨率，支持以下分辨率：512x512, 640x360, 640x480, 640x640, 680x512, 512x680, 768x768, 720x1280, 1280x720, 1024x1024", "type": "integer", "x-display": true, "x-from": 2}}, "required": ["width", "height", "prompt"], "type": "object"}}}, "required": true}, "responses": {"200": {"content": {"application/json": {"schema": {"properties": {"code": {"description": "状态码", "type": "integer", "x-display": true}, "data": {"description": "结果", "properties": {"image_url": {"description": "图片下载地址", "type": "string", "x-display": true}, "image_url_md": {"description": "图片下载地址markdown格式", "type": "string", "x-display": true}}, "type": "object", "x-display": true}, "message": {"description": "操作消息", "type": "string", "x-display": true}, "sid": {"description": "会话id", "type": "string", "x-display": true}}, "type": "object"}}}, "description": "success"}}, "summary": "文生图"}}}, "servers": [{"description": "a server description", "url": "http://core-aitools:18668"}]}', -- open_api_schema (TEXT)
+              	'2025-10-24 10:00:00', -- create_at (DATETIME)
+                '2025-10-24 10:00:00' -- update_at (DATETIME)
+              );
+              
+              INSERT INTO tools_schema (app_id, tool_id, name, description, open_api_schema, create_at, update_at)
+              VALUES (
+                'appid', -- app_id (VARCHAR(32))
+                'tool@8b2277329821000', -- tool_id (VARCHAR(32))
+                '图片理解', -- name (VARCHAR(128))
+                '用户输入一张图片和问题，从而识别出图片中的对象、场景等信息回答用户的问题', -- description (VARCHAR(512))
+                '{"info": {"title": "agentBuilder toolset", "version": "1.0.0", "x-is-official": false}, "openapi": "3.1.0", "paths": {"/aitools/v1/image_understanding": {"post": {"description": "用户输入一张图片和问题，从而识别出图片中的对象、场景等信息回答用户的问题", "operationId": "图片理解-Qo66kqwh", "requestBody": {"content": {"application/json": {"schema": {"properties": {"question": {"description": "问题", "type": "string", "x-display": true, "x-from": 2}, "image_url": {"description": "图片", "type": "string", "x-display": true, "x-from": 2}}, "required": ["question", "image_url"], "type": "object"}}}, "required": true}, "responses": {"200": {"content": {"application/json": {"schema": {"properties": {"code": {"description": "状态码", "type": "integer", "x-display": true}, "data": {"description": "结果", "properties": {"content": {"description": "回答内容", "type": "string", "x-display": true}}, "type": "object", "x-display": true}, "message": {"description": "操作消息", "type": "string", "x-display": true}, "sid": {"description": "会话id", "type": "string", "x-display": true}}, "type": "object"}}}, "description": "success"}}, "summary": "图片理解"}}}, "servers": [{"description": "a server description", "url": "http://core-aitools:18668"}]}', -- open_api_schema (TEXT)
+              	'2025-10-24 10:00:00', -- create_at (DATETIME)
+                '2025-10-24 10:00:00' -- update_at (DATETIME)
+              );
+              
+              INSERT INTO tools_schema (app_id, tool_id, name, description, open_api_schema, create_at, update_at)
+              VALUES (
+                'appid', -- app_id (VARCHAR(32))
+                'tool@8b2282136021000', -- tool_id (VARCHAR(32))
+                'OCR', -- name (VARCHAR(128))
+                '识别图片或PDF文件中的文字内容，目前支持PDF、PNG、JPG', -- description (VARCHAR(512))
+                '{"info": {"title": "agentBuilder toolset", "version": "1.0.0", "x-is-official": false}, "openapi": "3.1.0", "paths": {"/aitools/v1/ocr": {"post": {"description": "识别图片或PDF文件中的文字内容，目前支持PDF、PNG、JPG", "operationId": "OCR-9dRrb94M", "requestBody": {"content": {"application/json": {"schema": {"properties": {"file_url": {"description": "图片或pdf文件的url地址", "type": "string", "x-display": true, "x-from": 2}, "page_end": {"default": -1, "description": "当传入的是pdf链接，表示页码结束范围，-1表示全部页码，从0开始；图片链接不影响该值输入", "type": "integer", "x-display": true, "x-from": 2}, "page_start": {"default": -1, "description": "当传入的是pdf链接，表示页码开始范围，-1表示全部页码，从0开始；图片链接不影响该值输入", "type": "integer", "x-display": true, "x-from": 2}}, "required": ["file_url"], "type": "object"}}}, "required": true}, "responses": {"200": {"content": {"application/json": {"schema": {"properties": {"code": {"description": "状态码", "type": "integer", "x-display": true}, "data": {"description": "识别结果", "items": {"properties": {"content": {"description": "页面内容", "items": {"properties": {"source_data": {"description": "源数据", "type": "string", "x-display": true}, "name": {"description": "名称", "type": "string", "x-display": true}, "value": {"description": "内容", "type": "string", "x-display": true}}, "required": [], "type": "object"}, "type": "array", "x-display": true}, "file_index": {"description": "页码", "type": "integer", "x-display": true}}, "required": [], "type": "object"}, "type": "array", "x-display": true}, "message": {"description": "操作信息", "type": "string", "x-display": true}}, "type": "object"}}}, "description": "success"}}, "summary": "OCR"}}}, "servers": [{"description": "a server description", "url": "http://core-aitools:18668"}]}', -- open_api_schema (TEXT)
+                '2025-10-24 10:00:00', -- create_at (DATETIME)
+                '2025-10-24 10:00:00' -- update_at (DATETIME)
+              );
+          - path: /docker-entrypoint-initdb.d/03-tenant.sql
+            template: |-
+              select 'tenant DATABASE initialization started' as '';
+              CREATE DATABASE IF NOT EXISTS tenant;
+              
+              USE tenant;
+              
+              SET NAMES utf8mb4;
+              SET FOREIGN_KEY_CHECKS = 0;
+              
+              -- ----------------------------
+              -- Table structure for tb_app
+              -- ----------------------------
+              DROP TABLE IF EXISTS `tb_app`;
+              
+              CREATE TABLE `tb_app` (
+                `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                `registration_time` datetime DEFAULT NULL COMMENT '创建时间',
+                `app_id` varchar(32) COLLATE utf8_bin NOT NULL DEFAULT '' COMMENT '应用唯一标识',
+                `app_name` varchar(256) COLLATE utf8_bin DEFAULT NULL COMMENT '应用名称',
+                `dev_id` bigint(20) DEFAULT NULL COMMENT '开发者id',
+                `channel_id` varchar(128) COLLATE utf8_bin DEFAULT NULL COMMENT '渠道id',
+                `source` varchar(32) COLLATE utf8_bin DEFAULT '' COMMENT '来源',
+                `is_disable` tinyint(1) DEFAULT NULL COMMENT '是否禁用(true禁用 false启用)',
+                `app_desc` varchar(521) COLLATE utf8_bin DEFAULT NULL COMMENT '应用描述',
+                `is_delete` tinyint(1) DEFAULT NULL COMMENT '是否删除',
+                `extend` varchar(256) COLLATE utf8_bin DEFAULT '' COMMENT '扩展字段',
+                PRIMARY KEY (`app_id`),
+                KEY `idx_registration_time` (`registration_time`),
+                KEY `idx_dev_id` (`dev_id`)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin COMMENT='应用主表';
+              
+              INSERT INTO `tenant`.`tb_app` (`update_time`, `registration_time`, `app_id`, `app_name`, `dev_id`, `channel_id`, `source`, `is_disable`, `app_desc`, `is_delete`, `extend`)
+                  VALUES ('2025-09-20 00:00:00', '2025-09-20 00:00:00', '680ab54f', '星辰租户', 1, '0', 'admin', 0, '星辰租户', 0, '');
+              
+              -- ----------------------------
+              -- Table structure for tb_auth
+              -- ----------------------------
+              DROP TABLE IF EXISTS `tb_auth`;
+              CREATE TABLE `tb_auth` (
+                `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                `registration_time` datetime DEFAULT NULL COMMENT '创建时间',
+                `app_id` varchar(32) COLLATE utf8_bin NOT NULL DEFAULT '' COMMENT '应用唯一标识',
+                `api_key` varchar(128) COLLATE utf8_bin NOT NULL DEFAULT '' COMMENT '鉴权key',
+                `api_secret` varchar(128) COLLATE utf8_bin DEFAULT NULL COMMENT '鉴权私钥',
+                `source` bigint(20) DEFAULT NULL COMMENT '来源',
+                `is_delete` tinyint(1) DEFAULT NULL COMMENT '是否删除',
+                `extend` varchar(256) COLLATE utf8_bin DEFAULT NULL COMMENT '扩展字段',
+                PRIMARY KEY (`app_id`,`api_key`),
+                KEY `idx_registration_time` (`registration_time`),
+                KEY `idx_api_key` (`api_key`)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin COMMENT='应用关联的鉴权表';
+              
+              INSERT INTO `tenant`.`tb_auth` (`update_time`, `registration_time`, `app_id`, `api_key`, `api_secret`, `source`, `is_delete`, `extend`)
+                  VALUES ('2025-09-20 00:00:00', '2025-09-20 00:00:00', '680ab54f', '7b709739e8da44536127a333c7603a83', 'NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy', 0, 0, '');
+              
+              select 'tenant DATABASE initialization completed' as '';
+
+    - name: redis
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/redis.svg
+      template: PREBUILT_V2
+      spec:
+        source:
+          image: redis:7
+          command:
+            - redis-server
+            - /usr/local/etc/redis/redis.conf
+        ports:
+          - id: database
+            port: 6379
+            type: TCP
+        volumes:
+          - id: data
+            dir: /data
+        env:
+          REDIS_PASSWORD:
+            default: ${PASSWORD}
+            expose: true
+          REDIS_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          REDIS_PORT:
+            default: ${DATABASE_PORT}
+            expose: true
+            readonly: true
+        configs:
+          - path: /usr/local/etc/redis/redis.conf
+            template: |-
+              requirepass ${REDIS_PASSWORD}
+            envsubst: true
+
+    - name: minio
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/minio.svg
+      template: PREBUILT_V2
+      spec:
+        source:
+          image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+          command:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+        ports:
+          - id: api
+            port: 9000
+            type: HTTP
+          - id: console
+            port: 9001
+            type: HTTP
+        volumes:
+          - id: data
+            dir: /data
+        env:
+          MINIO_ROOT_USER:
+            default: minioadmin
+            expose: true
+          MINIO_ROOT_PASSWORD:
+            default: ${PASSWORD}
+            expose: true
+          MINIO_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+
+    # ===========================================================================
+    # Casdoor Authentication Services
+    # ===========================================================================
+
+    - name: casdoor-mysql
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/mysql.svg
+      template: PREBUILT_V2
+      spec:
+        source:
+          image: mysql:8.4.6
+        ports:
+          - id: database
+            port: 3306
+            type: TCP
+        volumes:
+          - id: data
+            dir: /var/lib/mysql
+        env:
+          MYSQL_ROOT_PASSWORD:
+            default: ${PASSWORD}
+          MYSQL_DATABASE:
+            default: casdoor
+          CASDOOR_MYSQL_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CASDOOR_MYSQL_PORT:
+            default: ${DATABASE_PORT}
+            expose: true
+            readonly: true
+          CASDOOR_MYSQL_ROOT_PASSWORD:
+            default: ${MYSQL_ROOT_PASSWORD}
+            expose: true
+            readonly: true
+
+    - name: casdoor
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/casdoor.svg
+      template: PREBUILT_V2
+      dependencies:
+        - casdoor-mysql
+      domainKey: CASDOOR_DOMAIN
+      spec:
+        source:
+          image: casbin/casdoor:v2.67.0
+          command:
+            - /server
+            - --createDatabase=true
+        ports:
+          - id: web
+            port: 8000
+            type: HTTP
+        volumes:
+          - id: logs
+            dir: /logs
+        env:
+          CASDOOR_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CASDOOR_PORT:
+            default: "8000"
+            expose: true
+            readonly: true
+          CASDOOR_PUBLIC_URL:
+            default: ${ZEABUR_WEB_URL}
+            expose: true
+            readonly: true
+          CONSOLE_DOMAIN:
+            default: https://${PUBLIC_DOMAIN}
+          CASDOOR_MYSQL_HOST:
+            default: ${CASDOOR_MYSQL_HOST}
+          CASDOOR_MYSQL_PORT:
+            default: ${CASDOOR_MYSQL_PORT}
+          CASDOOR_MYSQL_ROOT_PASSWORD:
+            default: ${CASDOOR_MYSQL_ROOT_PASSWORD}
+        configs:
+          - path: /conf/app.conf
+            template: |-
+              appname = casdoor
+              httpport = 8000
+              runmode = dev
+              copyrequestbody = true
+              driverName = mysql
+              dataSourceName = root:${CASDOOR_MYSQL_ROOT_PASSWORD}@tcp(${CASDOOR_MYSQL_HOST}:${CASDOOR_MYSQL_PORT})/
+              dbName = casdoor
+              tableNamePrefix =
+              showSql = false
+              redisEndpoint =
+              defaultStorageProvider =
+              isCloudIntranet = false
+              authState = "casdoor"
+              socks5Proxy = "127.0.0.1:10808"
+              verificationCodeTimeout = 10
+              initScore = 0
+              logPostOnly = true
+              isUsernameLowered = false
+              origin =
+              originFrontend =
+              staticBaseUrl = "https://cdn.casbin.org"
+              isDemoMode = false
+              batchSize = 100
+              enableErrorMask = false
+              enableGzip = true
+              inactiveTimeoutMinutes =
+              ldapServerPort = 1389
+              ldapsCertId = ""
+              ldapsServerPort = 636
+              radiusServerPort = 1812
+              radiusDefaultOrganization = "built-in"
+              radiusSecret = "secret"
+              quota = {"organization": -1, "user": -1, "application": -1, "provider": -1}
+              logConfig = {"adapter":"file", "filename": "logs/casdoor.log", "maxdays":99999, "perm":"0770"}
+              initDataNewOnly = true
+              initDataFile = "/conf/init_data.json"
+              frontendBaseDir = "../cc_0"
+            envsubst: true
+          - path: /conf/init_data.json
+            template: |-
+              {
+                "organizations": [
+                  {
+                    "owner": "admin",
+                    "name": "built-in",
+                    "createdTime": "2025-09-20T10:47:17Z",
+                    "displayName": "Built-in Organization",
+                    "websiteUrl": "https://example.com",
+                    "logo": "",
+                    "logoDark": "",
+                    "favicon": "https://cdn.casbin.org/img/casbin/favicon.ico",
+                    "hasPrivilegeConsent": false,
+                    "passwordType": "plain",
+                    "passwordSalt": "",
+                    "passwordOptions": [
+                      "AtLeast6"
+                    ],
+                    "passwordObfuscatorType": "",
+                    "passwordObfuscatorKey": "",
+                    "passwordExpireDays": 0,
+                    "countryCodes": [
+                      "US",
+                      "ES",
+                      "FR",
+                      "DE",
+                      "GB",
+                      "CN",
+                      "JP",
+                      "KR",
+                      "VN",
+                      "ID",
+                      "SG",
+                      "IN"
+                    ],
+                    "defaultAvatar": "https://cdn.casbin.org/img/casbin.svg",
+                    "defaultApplication": "",
+                    "userTypes": [],
+                    "tags": [],
+                    "languages": [
+                      "en",
+                      "zh",
+                      "es",
+                      "fr",
+                      "de",
+                      "id",
+                      "ja",
+                      "ko",
+                      "ru",
+                      "vi",
+                      "pt"
+                    ],
+                    "themeData": null,
+                    "masterPassword": "",
+                    "defaultPassword": "",
+                    "masterVerificationCode": "",
+                    "ipWhitelist": "",
+                    "initScore": 2000,
+                    "enableSoftDeletion": false,
+                    "isProfilePublic": false,
+                    "useEmailAsUsername": false,
+                    "enableTour": true,
+                    "disableSignin": false,
+                    "ipRestriction": "",
+                    "navItems": null,
+                    "widgetItems": null,
+                    "mfaItems": null,
+                    "mfaRememberInHours": 0,
+                    "accountItems": [
+                      {
+                        "name": "Organization",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "ID",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Immutable",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Name",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Display name",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Avatar",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "User type",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Password",
+                        "visible": true,
+                        "viewRule": "Self",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Email",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Phone",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Country code",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Country/Region",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Location",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Affiliation",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Title",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Homepage",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Bio",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Tag",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Signup application",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Roles",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Immutable",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Permissions",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Immutable",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Groups",
+                        "visible": true,
+                        "viewRule": "Public",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "3rd-party logins",
+                        "visible": true,
+                        "viewRule": "Self",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Properties",
+                        "visible": true,
+                        "viewRule": "Admin",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Is admin",
+                        "visible": true,
+                        "viewRule": "Admin",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Is forbidden",
+                        "visible": true,
+                        "viewRule": "Admin",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Is deleted",
+                        "visible": true,
+                        "viewRule": "Admin",
+                        "modifyRule": "Admin",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Multi-factor authentication",
+                        "visible": true,
+                        "viewRule": "Self",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "WebAuthn credentials",
+                        "visible": true,
+                        "viewRule": "Self",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "Managed accounts",
+                        "visible": true,
+                        "viewRule": "Self",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      },
+                      {
+                        "name": "MFA accounts",
+                        "visible": true,
+                        "viewRule": "Self",
+                        "modifyRule": "Self",
+                        "regex": ""
+                      }
+                    ]
+                  }
+                ],
+                "users": [
+                  {
+                    "owner": "built-in",
+                    "name": "admin",
+                    "createdTime": "2025-09-20T10:47:17Z",
+                    "updatedTime": "",
+                    "deletedTime": "",
+                    "id": "1e3b4ee5-7164-47c4-a421-a2ff4938c765",
+                    "externalId": "",
+                    "type": "normal-user",
+                    "password": "123",
+                    "passwordSalt": "",
+                    "passwordType": "plain",
+                    "displayName": "Admin",
+                    "firstName": "",
+                    "lastName": "",
+                    "avatar": "https://cdn.casbin.org/img/casbin.svg",
+                    "avatarType": "",
+                    "permanentAvatar": "",
+                    "email": "admin@example.com",
+                    "emailVerified": false,
+                    "phone": "12345678910",
+                    "countryCode": "US",
+                    "region": "",
+                    "location": "",
+                    "address": [],
+                    "affiliation": "Example Inc.",
+                    "title": "",
+                    "idCardType": "",
+                    "idCard": "",
+                    "homepage": "",
+                    "bio": "",
+                    "tag": "staff",
+                    "language": "",
+                    "gender": "",
+                    "birthday": "",
+                    "education": "",
+                    "score": 2000,
+                    "karma": 0,
+                    "ranking": 1,
+                    "balance": 0,
+                    "currency": "",
+                    "isDefaultAvatar": false,
+                    "isOnline": false,
+                    "isAdmin": true,
+                    "isForbidden": false,
+                    "isDeleted": false,
+                    "signupApplication": "app-built-in",
+                    "hash": "",
+                    "preHash": "",
+                    "accessKey": "",
+                    "accessSecret": "",
+                    "accessToken": "",
+                    "createdIp": "127.0.0.1",
+                    "lastSigninTime": "",
+                    "lastSigninIp": "",
+                    "github": "",
+                    "google": "",
+                    "qq": "",
+                    "wechat": "",
+                    "facebook": "",
+                    "dingtalk": "",
+                    "weibo": "",
+                    "gitee": "",
+                    "linkedin": "",
+                    "wecom": "",
+                    "lark": "",
+                    "gitlab": "",
+                    "adfs": "",
+                    "baidu": "",
+                    "alipay": "",
+                    "casdoor": "",
+                    "infoflow": "",
+                    "apple": "",
+                    "azuread": "",
+                    "azureadb2c": "",
+                    "slack": "",
+                    "steam": "",
+                    "bilibili": "",
+                    "okta": "",
+                    "douyin": "",
+                    "kwai": "",
+                    "line": "",
+                    "amazon": "",
+                    "auth0": "",
+                    "battlenet": "",
+                    "bitbucket": "",
+                    "box": "",
+                    "cloudfoundry": "",
+                    "dailymotion": "",
+                    "deezer": "",
+                    "digitalocean": "",
+                    "discord": "",
+                    "dropbox": "",
+                    "eveonline": "",
+                    "fitbit": "",
+                    "gitea": "",
+                    "heroku": "",
+                    "influxcloud": "",
+                    "instagram": "",
+                    "intercom": "",
+                    "kakao": "",
+                    "lastfm": "",
+                    "mailru": "",
+                    "meetup": "",
+                    "microsoftonline": "",
+                    "naver": "",
+                    "nextcloud": "",
+                    "onedrive": "",
+                    "oura": "",
+                    "patreon": "",
+                    "paypal": "",
+                    "salesforce": "",
+                    "shopify": "",
+                    "soundcloud": "",
+                    "spotify": "",
+                    "strava": "",
+                    "stripe": "",
+                    "tiktok": "",
+                    "tumblr": "",
+                    "twitch": "",
+                    "twitter": "",
+                    "typetalk": "",
+                    "uber": "",
+                    "vk": "",
+                    "wepay": "",
+                    "xero": "",
+                    "yahoo": "",
+                    "yammer": "",
+                    "yandex": "",
+                    "zoom": "",
+                    "metamask": "",
+                    "web3onboard": "",
+                    "custom": "",
+                    "webauthnCredentials": null,
+                    "preferredMfaType": "",
+                    "recoveryCodes": null,
+                    "totpSecret": "",
+                    "mfaPhoneEnabled": false,
+                    "mfaEmailEnabled": false,
+                    "invitation": "",
+                    "invitationCode": "",
+                    "faceIds": null,
+                    "ldap": "",
+                    "properties": {},
+                    "roles": null,
+                    "permissions": null,
+                    "groups": null,
+                    "lastChangePasswordTime": "",
+                    "lastSigninWrongTime": "",
+                    "signinWrongTimes": 0,
+                    "managedAccounts": null,
+                    "mfaAccounts": null,
+                    "mfaItems": null,
+                    "mfaRememberDeadline": "",
+                    "needUpdatePassword": false,
+                    "ipWhitelist": ""
+                  }
+                ],
+                "applications": [
+                  {
+                    "owner": "admin",
+                    "name": "app-built-in",
+                    "createdTime": "2025-09-20T10:47:17Z",
+                    "displayName": "Casdoor",
+                    "logo": "https://cdn.casbin.org/img/casdoor-logo_1185x256.png",
+                    "order": 0,
+                    "homepageUrl": "https://casdoor.org",
+                    "description": "",
+                    "organization": "built-in",
+                    "cert": "cert-built-in",
+                    "defaultGroup": "",
+                    "headerHtml": "",
+                    "enablePassword": true,
+                    "enableSignUp": true,
+                    "disableSignin": false,
+                    "enableSigninSession": false,
+                    "enableAutoSignin": false,
+                    "enableCodeSignin": false,
+                    "enableSamlCompress": false,
+                    "enableSamlC14n10": false,
+                    "enableSamlPostBinding": false,
+                    "useEmailAsSamlNameId": false,
+                    "enableWebAuthn": false,
+                    "enableLinkWithEmail": false,
+                    "orgChoiceMode": "",
+                    "samlReplyUrl": "",
+                    "providers": [
+                      {
+                        "owner": "",
+                        "name": "provider_captcha_default",
+                        "canSignUp": false,
+                        "canSignIn": false,
+                        "canUnlink": false,
+                        "countryCodes": null,
+                        "prompted": false,
+                        "signupGroup": "",
+                        "rule": "None",
+                        "provider": null
+                      }
+                    ],
+                    "signinMethods": [
+                      {
+                        "name": "Password",
+                        "displayName": "Password",
+                        "rule": "All"
+                      },
+                      {
+                        "name": "Verification code",
+                        "displayName": "Verification code",
+                        "rule": "All"
+                      },
+                      {
+                        "name": "WebAuthn",
+                        "displayName": "WebAuthn",
+                        "rule": "None"
+                      },
+                      {
+                        "name": "Face ID",
+                        "displayName": "Face ID",
+                        "rule": "None"
+                      }
+                    ],
+                    "signupItems": [
+                      {
+                        "name": "ID",
+                        "visible": false,
+                        "required": true,
+                        "prompted": false,
+                        "type": "",
+                        "customCss": "",
+                        "label": "",
+                        "placeholder": "",
+                        "options": null,
+                        "regex": "",
+                        "rule": "Random"
+                      },
+                      {
+                        "name": "Username",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "type": "",
+                        "customCss": "",
+                        "label": "",
+                        "placeholder": "",
+                        "options": null,
+                        "regex": "",
+                        "rule": "None"
+                      },
+                      {
+                        "name": "Display name",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "type": "",
+                        "customCss": "",
+                        "label": "",
+                        "placeholder": "",
+                        "options": null,
+                        "regex": "",
+                        "rule": "None"
+                      },
+                      {
+                        "name": "Password",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "type": "",
+                        "customCss": "",
+                        "label": "",
+                        "placeholder": "",
+                        "options": null,
+                        "regex": "",
+                        "rule": "None"
+                      },
+                      {
+                        "name": "Confirm password",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "type": "",
+                        "customCss": "",
+                        "label": "",
+                        "placeholder": "",
+                        "options": null,
+                        "regex": "",
+                        "rule": "None"
+                      },
+                      {
+                        "name": "Email",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "type": "",
+                        "customCss": "",
+                        "label": "",
+                        "placeholder": "",
+                        "options": null,
+                        "regex": "",
+                        "rule": "Normal"
+                      },
+                      {
+                        "name": "Phone",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "type": "",
+                        "customCss": "",
+                        "label": "",
+                        "placeholder": "",
+                        "options": null,
+                        "regex": "",
+                        "rule": "None"
+                      },
+                      {
+                        "name": "Agreement",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "type": "",
+                        "customCss": "",
+                        "label": "",
+                        "placeholder": "",
+                        "options": null,
+                        "regex": "",
+                        "rule": "None"
+                      }
+                    ],
+                    "signinItems": null,
+                    "grantTypes": null,
+                    "organizationObj": null,
+                    "certPublicKey": "",
+                    "tags": [],
+                    "samlAttributes": null,
+                    "isShared": false,
+                    "ipRestriction": "",
+                    "clientId": "1d1eb3c891fa8faa7d63",
+                    "clientSecret": "4d623f9beb97dd8263bbf3147e194ad3b0b1c9e2",
+                    "redirectUris": [],
+                    "forcedRedirectOrigin": "",
+                    "tokenFormat": "JWT",
+                    "tokenSigningMethod": "",
+                    "tokenFields": [],
+                    "tokenAttributes": null,
+                    "expireInHours": 168,
+                    "refreshExpireInHours": 0,
+                    "signupUrl": "",
+                    "signinUrl": "",
+                    "forgetUrl": "",
+                    "affiliationUrl": "",
+                    "ipWhitelist": "",
+                    "termsOfUse": "",
+                    "signupHtml": "",
+                    "signinHtml": "",
+                    "themeData": null,
+                    "footerHtml": "",
+                    "formCss": "",
+                    "formCssMobile": "",
+                    "formOffset": 2,
+                    "formSideHtml": "",
+                    "formBackgroundUrl": "",
+                    "formBackgroundUrlMobile": "",
+                    "failedSigninLimit": 0,
+                    "failedSigninFrozenTime": 0
+                  },
+                  {
+                    "owner": "admin",
+                    "name": "astron-agent-app",
+                    "displayName": "Astron Agent Application",
+                    "logo": "https://raw.githubusercontent.com/iflytek/astron-agent/bf285fd637e0920f38fbfd293f22e950b7534484/docs/logo.svg",
+                    "organization": "built-in",
+                    "cert": "cert-built-in",
+                    "enablePassword": true,
+                    "enableSignUp": true,
+                    "clientId": "astron-agent-client",
+                    "redirectUris": [
+                      "${CONSOLE_DOMAIN}/callback"
+                    ],
+                    "tokenFormat": "JWT",
+                    "tokenFields": [],
+                    "expireInHours": 168,
+                    "refreshExpireInHours": 168,
+                    "grantTypes": [
+                      "authorization_code",
+                      "refresh_token"
+                    ],
+                    "signinMethods": [
+                      {
+                        "name": "Password",
+                        "displayName": "Password",
+                        "rule": "All"
+                      }
+                    ],
+                    "signupItems": [
+                      {
+                        "name": "Username",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "rule": "None"
+                      },
+                      {
+                        "name": "Password",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "rule": "None"
+                      },
+                      {
+                        "name": "Email",
+                        "visible": true,
+                        "required": true,
+                        "prompted": false,
+                        "rule": "None"
+                      }
+                    ],
+                    "tags": [],
+                    "formOffset": 2
+                  }
+                ],
+                "certs": [
+                  {
+                    "owner": "admin",
+                    "name": "cert-built-in",
+                    "createdTime": "2025-09-20T10:47:17Z",
+                    "displayName": "Built-in Cert",
+                    "scope": "JWT",
+                    "type": "x509",
+                    "cryptoAlgorithm": "RS256",
+                    "bitSize": 4096,
+                    "expireInYears": 20,
+                    "certificate": "-----BEGIN CERTIFICATE-----\nMIIE3TCCAsWgAwIBAgIDAeJAMA0GCSqGSIb3DQEBCwUAMCgxDjAMBgNVBAoTBWFk\nbWluMRYwFAYDVQQDEw1jZXJ0LWJ1aWx0LWluMB4XDTI1MDkyMDEwNDcxOFoXDTQ1\nMDkyMDEwNDcxOFowKDEOMAwGA1UEChMFYWRtaW4xFjAUBgNVBAMTDWNlcnQtYnVp\nbHQtaW4wggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQDL9L2vPZEXUP4z\nmbVhlgpQx35HzCvQGr+Hbi+ENf5rUadq2X8JVJ5Js3vsi/dMXoXuw2wScltgayEp\nOuyh775uXC/gOrKgfnwANE9VRU9jwBdpZcLeQBfZB2gVQZDYt2wZBSpCwp78I2AS\neWgpvBDXDTp8fV2bJBu7yaLPTdysXVCpdHEkEan7xCAY9yHl9psiqn8aVD4f9T+U\n/oHRIvyAVLpxgQ6w/Lsk2Zcw7lI4feRlF0PYQouoof91gnOIjkYEyFvF/imuL+Xg\nQuA6yMfJ04lfLt8lwu3jAwGw7VIA8LE2pQ6DmJ4pEbFBMU3H626HNel1dxEjW/j+\nTv47nkCPpXGI0w17fc54fbZ7VmtZ6LizxkBfhWf+j8Rm3hpMr6tJ6ISjUajyB17U\n1w9QWU9pOJa/cehOVczEehQLjhX5MZGAUovlmMNojKAtOO/tdcRsDMwOHJyXBqHa\noCykyJ00eIguTtmTTboAqdx3cpom8wNjRh5sUB+YkpsYTVVe/a5r0olfZHDos5bf\nknJXi9X+ppD7nvoCtwrki6AH5Dw9prsrql3sagUHgBKBVLG3EIhDIlkRTQDOO55C\n8OzuyVbDkIbcEX8BIFj8yoUAP/DcpazHHOGhjHRRcFvVHAGRtz8fH6qB9hX3N3a+\nTevIZoANOYLgN6ACWJ0bODLAO9pwWwIDAQABoxAwDjAMBgNVHRMBAf8EAjAAMA0G\nCSqGSIb3DQEBCwUAA4ICAQAT63JAwjc151XNWbMSr5ClNGd+bwEx+zDnQh/YD8V7\n8Wqj2E4r8B+wysDVu7YdOQkoIjtlFOLACg0469F7oC+kPi6N8vMFFZ+xXWk6qLed\nOFYsdUyH+l643GfMprFMA1qbJvqcOnymggeMA1rSJMu9PJ5g7WfoEg6UTKh7H9HV\nvHvgVzLweiZCS37FCC5+RDt/rOCzIrI2DfwDbf4CLKXft7mr3mnA3kVRuT+ufI9X\n+e6UqmM7EBFYeZAHi8/GXIQ8/j34ag5hiIISMhjuFYKEfMtqLYUCTH6X7NTGbGrv\nAs8YB2x5QnUj89N7IRv2hr1uJnaZOIx5feLRmuRmo35scLopAnNu0VT75TOS0Ifh\nyrouqlep4grk4DMFSWEMNodpkHHLr4pOVE8vCYphli75/beOkiilUpxGI6/osKKo\nSOC5CuC6hDarVBF3q6zpNEnqalQf9Vf2d4zeCKMfV2IuUOqKRaRFpVZfVJsbiYTi\nYF1VUCTFdfrIFsC5V9LknxvLyq8ubzpXHnIV6m/l95OxxCEDvI47l5RmwkblKk57\nH9IRmr6l66Ar2WRGQYAxpiOz3aF8IMg8f0+Vk91FNTsgNrSsk9uovQrrDDtm3KyO\nEzhOO4NA9WgaE1c6GzZD87GhrZukHWHE4KvTpkiQ3pGmTqUjIHvon+0lKtG8E5fz\nKg==\n-----END CERTIFICATE-----\n",
+                    "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nMIIJKQIBAAKCAgEAy/S9rz2RF1D+M5m1YZYKUMd+R8wr0Bq/h24vhDX+a1Gnatl/\nCVSeSbN77Iv3TF6F7sNsEnJbYGshKTrsoe++blwv4DqyoH58ADRPVUVPY8AXaWXC\n3kAX2QdoFUGQ2LdsGQUqQsKe/CNgEnloKbwQ1w06fH1dmyQbu8miz03crF1QqXRx\nJBGp+8QgGPch5fabIqp/GlQ+H/U/lP6B0SL8gFS6cYEOsPy7JNmXMO5SOH3kZRdD\n2EKLqKH/dYJziI5GBMhbxf4pri/l4ELgOsjHydOJXy7fJcLt4wMBsO1SAPCxNqUO\ng5ieKRGxQTFNx+tuhzXpdXcRI1v4/k7+O55Aj6VxiNMNe33OeH22e1ZrWei4s8ZA\nX4Vn/o/EZt4aTK+rSeiEo1Go8gde1NcPUFlPaTiWv3HoTlXMxHoUC44V+TGRgFKL\n5ZjDaIygLTjv7XXEbAzMDhyclwah2qAspMidNHiILk7Zk026AKncd3KaJvMDY0Ye\nbFAfmJKbGE1VXv2ua9KJX2Rw6LOW35JyV4vV/qaQ+576ArcK5IugB+Q8Paa7K6pd\n7GoFB4ASgVSxtxCIQyJZEU0AzjueQvDs7slWw5CG3BF/ASBY/MqFAD/w3KWsxxzh\noYx0UXBb1RwBkbc/Hx+qgfYV9zd2vk3ryGaADTmC4DegAlidGzgywDvacFsCAwEA\nAQKCAgEAtERUJ4BuLkKa+3afF2qrIWzB06nFC8GoiYY9H0kt3yMjq1AjdVbCNPgb\nzx6C7JAbJsa5TbCfzR/DBpMbNaIWGasHcdPPsAU7il6xw/dnzQ2qY7DaxN+3dE6U\nkz0JTlMIizDCgpFMPiTyNEH0a/bal4kMqZ2Qz5/hl2AHs9zo77vmoG/X1H58VJer\nmwVLg9sskT5K6zWMV2jH0uQET5nxvWemBs5/8rTeoBpmBIyQRXgYF7WxdIKUt+6/\nQNiVTxwZDP8eBmi35EpXjpjtYWe3Fk8O+v8Nom2hHuW4Z+3KbiRPLbJDmtKY8Em/\n9pQiYFJZtc5T00vy7OLMt9GP6ZfdDMXHqGT/VFJuYNQhRWgaf9JE5zZuQ3O/D1BH\nAbY0+a825DcOn2XqP3KlHOR1CJyFhphZDowxg2pjhQ548+30eQ9/IoTvgrEnReRW\n3/USVvcUA4lgmzKv50BLiy9wK55FVglafdRm1fq3ykQwAZ/ok4ah2U+ZA98Hh8/V\n4xZ/KSBlNxSfBEPKlPkSBBrwqUwZtrwcHUg0qiRrJGvGxqKPUb0kOQmQjX2VNPoU\nPYzHO9G83RFeJU5KjMj9+apXV2qSL1m8wFJ/aHraUoaOhQ7AzETY0H8r0EbBunq3\nQ8s3Foeb3/p9DOxZxODaDKYDKHM43h1Oro+JjXy+21KSBBjAQrkCggEBAOZzNUlB\nayl/c6ynVlaYR2UGPdbymbAu8dB2Yj/OFjKQgWl2pKVpjUvva7A8p0smU+oC3fVQ\n9qBT6834N8jUqKUCxkHnVw1UDhXPJofqOkaLwf4cLL3X1PbPShaZbEM45YZqmU/c\npihL/myVcXFxntzQZ9NxzJU1wu4uwII0jd1ciFNssulxobgN0JDLM3jJ+Vf1yFUC\nJgCscZcRWBb0HW1IxHVic3GPEzg1hwgyt9V+e/xdKuy4+LQuPPsVBiy5lsVBtwXY\nN5Ve2k9dp0etnoQE+xjdcDwJVNgD46C4nw8e177u20cDyevILbxCRlSJ/ptQXgVu\nc3UZ9o9Y51N9HfUCggEBAOKRj7vGLhUf0Tv7+qroktTaj6jFUQr+JFQKuOTAHo1C\nghyIAtDjDPl3Be+DWPrvXSswEjOqI/haTjxUmTQgJEmuQEfebE7n0fOf25jcCFwb\nIEFgzvLJSvEiZX7y8nPFffP5TSzS/gxiqNZVJ0im3aAYUK48DXY+6Sg+xhOAPpzY\nysLifc6P2WlGt3OntuMYYgCqGwmlnRNVADdlqt5EH/mRRuxjqGQqXovozlQ8UBTL\nDX4fDLjkcqdG22mOD0qscvsG36LTjpcERposjQ6Qa6QFkGoNd5qYTILW3oq36NsJ\nevucMPSK6HWEbCkrC9Z6Q+PSuILHRNWJSThkAuzKkw8CggEAb6BEomxWvS4oWOxh\njOaMRqokUDcJLOdAaKq/YoqwA+QtW2mFzT34nFynvCFVI7i4EvU6kHacUAL2iLmA\nQ/6Ghg92+ztU1nbtr7C8yD8z5TITUMRTA85FMRwtlg7Q+yrXOyntg1qs/X36CpzE\n65+OxQUKFcjcwTXea0MoKqnMQfptaoOPkjZhkGbYrRpQn2SuK+Y5GLxGrjLZfsR+\n9/ddPa9uwjFjHBGizKpY8yamF3sCEbcLcMkUZyqyjSic6hMnrfrr7Z/TJL5iXulN\nexHlY6uJ+XxhviMC/vO7UgG7wjY9aRYIDzkNmPFI/hTYPmDtfEwMjvL2aDWgUcVN\noApN9QKCAQEAyhT21I7BD4pff1cSj1n9jOicdfX4gQuIr4UYwL8zAN+vWW9ew52g\nNumYW7cVqEvTF/A6a+Z3Ss6RNXJna3y3oRhQsUmL5R0TwG522XJ36l8vd+C29Qnh\nVA5P5Nkgs24VF4Tm9vICMl3VJcax0TU0O9U0MRPTFgKqx4Cl/0LFlfQvdX+6ooDf\nc+zlN70BfLCEyP7wOryCy3lnRgHiU3kD4/9V+QYybZT022l8jtl0u/cYQ8PB/y+T\nq+uhTBavQPVrYMcStRJo/f2MU3slHTZnK9biphT49uScaZ7ow2WhxaxBCyaW66by\nC89fAaEpX9WRtCSA+fRuSt+2dRuPGFDetQKCAQBNxBbtOrw79tpq7NaSWlylTR+K\nQJeUSol1NpktS17dLesFc6c4vVc90tOrQvmK9MoOdYpk7/ZMpIpXtgtoegEnN34r\nbfyb+O4UeOi44Y/cKr1Av3bZmp2lRQtTXZJkRlRI5kowVAHOP70WWytcfIYW+zbZ\nOSRiQOT2UFaIQjdZml9jvD/Zhr8TuLPZoaRuhWVLID0LZrix9ivYD028uHoiONl3\nbmzNhqTlcGC/skh5hn6ohEyizvHLIrpbUPK66xOWjcheFi+wKfGpKOZxt325y64D\nhQkmJquirnONmiUNuKWIUxOkbC/spnrAJ72dStfEo2V59hG5jitTlmoaXAo+\n-----END RSA PRIVATE KEY-----\n"
+                  }
+                ]
+              }
+            envsubst: true
+
+    # ===========================================================================
+    # Astron Agent Core Services
+    # ===========================================================================
+
+    - name: core-tenant
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - postgresql
+        - mysql
+        - redis
+        - minio
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/core-tenant:latest
+        volumes:
+          - id: logs
+            dir: /opt/tenant/logs
+        env:
+          SERVICE_PORT:
+            default: "5052"
+          SERVICE_LOCATION:
+            default: hf
+          DATABASE_DB_TYPE:
+            default: mysql
+          DATABASE_USERNAME:
+            default: root
+          DATABASE_PASSWORD:
+            default: ${MYSQL_ROOT_PASSWORD}
+          DATABASE_URL:
+            default: (${MYSQL_HOST}:${MYSQL_PORT})/tenant
+          DATABASE_MAX_OPEN_CONNS:
+            default: "5"
+          DATABASE_MAX_IDLE_CONNS:
+            default: "5"
+          LOG_PATH:
+            default: log.txt
+          CORE_TENANT_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CORE_TENANT_PORT:
+            default: "5052"
+            expose: true
+            readonly: true
+
+    - name: core-database
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - postgresql
+        - mysql
+        - redis
+        - minio
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/core-database:latest
+        volumes:
+          - id: logs
+            dir: /opt/core/memory/database/logs
+        env:
+          SERVICE_PORT:
+            default: "7990"
+          PGSQL_HOST:
+            default: ${POSTGRES_HOST}
+          PGSQL_PORT:
+            default: ${POSTGRES_PORT}
+          PGSQL_USER:
+            default: ${POSTGRES_USER}
+          PGSQL_PASSWORD:
+            default: ${POSTGRES_PASSWORD}
+          PGSQL_DATABASE:
+            default: sparkdb_manager
+          REDIS_ADDR:
+            default: ${REDIS_HOST}:${REDIS_PORT}
+          REDIS_PASSWORD:
+            default: ${REDIS_PASSWORD}
+          OTLP_ENABLE:
+            default: "0"
+          CORE_DATABASE_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CORE_DATABASE_PORT:
+            default: "7990"
+            expose: true
+            readonly: true
+
+    - name: core-rpa
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - postgresql
+        - mysql
+        - redis
+        - minio
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/core-rpa:latest
+        volumes:
+          - id: logs
+            dir: /opt/core/logs
+        env:
+          SERVICE_PORT:
+            default: "17198"
+          OTLP_ENABLE:
+            default: "0"
+          KAFKA_ENABLE:
+            default: "0"
+          XIAOWU_RPA_TASK_CREATE_URL:
+            default: https://newapi.iflyrpa.com/api/rpa-openapi/workflows/execute-async
+          XIAOWU_RPA_TASK_QUERY_URL:
+            default: https://newapi.iflyrpa.com/api/rpa-openapi/executions
+          CORE_RPA_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CORE_RPA_PORT:
+            default: "17198"
+            expose: true
+            readonly: true
+
+    - name: core-link
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - postgresql
+        - mysql
+        - redis
+        - minio
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/core-link:latest
+        volumes:
+          - id: logs
+            dir: /opt/core/plugin/link/logs
+        env:
+          SERVICE_PORT:
+            default: "18888"
+          MYSQL_HOST:
+            default: ${MYSQL_HOST}
+          MYSQL_PORT:
+            default: ${MYSQL_PORT}
+          MYSQL_USER:
+            default: root
+          MYSQL_PASSWORD:
+            default: ${MYSQL_ROOT_PASSWORD}
+          MYSQL_DB:
+            default: spark-link
+          REDIS_IS_CLUSTER:
+            default: "false"
+          REDIS_ADDR:
+            default: ${REDIS_HOST}:${REDIS_PORT}
+          REDIS_PASSWORD:
+            default: ${REDIS_PASSWORD}
+          OTLP_ENABLE:
+            default: "0"
+          KAFKA_ENABLE:
+            default: "0"
+          CORE_LINK_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CORE_LINK_PORT:
+            default: "18888"
+            expose: true
+            readonly: true
+
+    - name: core-aitools
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - postgresql
+        - mysql
+        - redis
+        - minio
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/core-aitools:latest
+        volumes:
+          - id: logs
+            dir: /opt/core/logs
+        env:
+          SERVICE_PORT:
+            default: "18668"
+          OSS_TYPE:
+            default: s3
+          OSS_ENDPOINT:
+            default: http://${MINIO_HOST}:9000
+          OSS_ACCESS_KEY_ID:
+            default: ${MINIO_ROOT_USER}
+          OSS_ACCESS_KEY_SECRET:
+            default: ${MINIO_ROOT_PASSWORD}
+          OSS_BUCKET_NAME:
+            default: workflow
+          OSS_DOWNLOAD_HOST:
+            default: http://${MINIO_HOST}:9000
+          OSS_TTL:
+            default: "157788000"
+          KAFKA_ENABLE:
+            default: "0"
+          AI_APP_ID:
+            default: ${PLATFORM_APP_ID}
+          AI_API_KEY:
+            default: ${PLATFORM_API_KEY}
+          AI_API_SECRET:
+            default: ${PLATFORM_API_SECRET}
+          CORE_AITOOLS_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CORE_AITOOLS_PORT:
+            default: "18668"
+            expose: true
+            readonly: true
+
+    - name: core-knowledge
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - postgresql
+        - mysql
+        - redis
+        - minio
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/core-knowledge:latest
+        volumes:
+          - id: logs
+            dir: /opt/core/logs
+        env:
+          SERVICE_PORT:
+            default: "20010"
+          OTLP_ENABLE:
+            default: "0"
+          RAGFLOW_BASE_URL:
+            default: ""
+          RAGFLOW_API_TOKEN:
+            default: ""
+          RAGFLOW_TIMEOUT:
+            default: "60"
+          XINGHUO_APP_ID:
+            default: ${PLATFORM_APP_ID}
+          XINGHUO_APP_SECRET:
+            default: ${PLATFORM_API_SECRET}
+          CORE_KNOWLEDGE_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CORE_KNOWLEDGE_PORT:
+            default: "20010"
+            expose: true
+            readonly: true
+
+    - name: core-workflow
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - postgresql
+        - mysql
+        - redis
+        - minio
+        - core-knowledge
+        - core-link
+        - core-tenant
+        - core-database
+        - core-rpa
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/core-workflow:latest
+        volumes:
+          - id: logs
+            dir: /opt/core/logs
+        env:
+          SERVICE_PORT:
+            default: "7880"
+          RUNTIME_ENV:
+            default: dev
+          MYSQL_HOST:
+            default: ${MYSQL_HOST}
+          MYSQL_PORT:
+            default: ${MYSQL_PORT}
+          MYSQL_USER:
+            default: root
+          MYSQL_PASSWORD:
+            default: ${MYSQL_ROOT_PASSWORD}
+          MYSQL_DB:
+            default: workflow
+          REDIS_ADDR:
+            default: ${REDIS_HOST}:${REDIS_PORT}
+          REDIS_PASSWORD:
+            default: ${REDIS_PASSWORD}
+          REDIS_EXPIRE:
+            default: "3600"
+          OTLP_ENABLE:
+            default: "0"
+          OSS_TYPE:
+            default: s3
+          OSS_ENDPOINT:
+            default: http://${MINIO_HOST}:9000
+          OSS_ACCESS_KEY_ID:
+            default: ${MINIO_ROOT_USER}
+          OSS_ACCESS_KEY_SECRET:
+            default: ${MINIO_ROOT_PASSWORD}
+          OSS_BUCKET_NAME:
+            default: workflow
+          OSS_DOWNLOAD_HOST:
+            default: http://${MINIO_HOST}:9000
+          OSS_TTL:
+            default: "157788000"
+          KAFKA_ENABLE:
+            default: "0"
+          KNOWLEDGE_BASE_URL:
+            default: http://${CORE_KNOWLEDGE_HOST}:20010
+          KNOWLEDGE_PRO_BASE_URL:
+            default: http://${CORE_KNOWLEDGE_HOST}:20010
+          PLUGIN_BASE_URL:
+            default: http://${CORE_LINK_HOST}:18888
+          WORKFLOW_BASE_URL:
+            default: http://${CONTAINER_HOSTNAME}:7880
+          APP_MANAGE_PLAT_BASE_URL:
+            default: http://${CORE_TENANT_HOST}:5052
+          PGSQL_BASE_URL:
+            default: http://${CORE_DATABASE_HOST}:7990
+          RPA_BASE_URL:
+            default: http://${CORE_RPA_HOST}:17198
+          CORE_WORKFLOW_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CORE_WORKFLOW_PORT:
+            default: "7880"
+            expose: true
+            readonly: true
+
+    - name: core-agent
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - postgresql
+        - mysql
+        - redis
+        - minio
+        - core-link
+        - core-workflow
+        - core-knowledge
+        - core-tenant
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/core-agent:latest
+        env:
+          SERVICE_PORT:
+            default: "17870"
+          SERVICE_LOCATION:
+            default: hf
+          SERVICE_HOST:
+            default: 0.0.0.0
+          SERVICE_WORKERS:
+            default: "1"
+          SERVICE_RELOAD:
+            default: "false"
+          REDIS_ADDR:
+            default: ${REDIS_HOST}:${REDIS_PORT}
+          REDIS_PASSWORD:
+            default: ${REDIS_PASSWORD}
+          REDIS_EXPIRE:
+            default: "3600"
+          MYSQL_HOST:
+            default: ${MYSQL_HOST}
+          MYSQL_PORT:
+            default: ${MYSQL_PORT}
+          MYSQL_USER:
+            default: root
+          MYSQL_PASSWORD:
+            default: ${MYSQL_ROOT_PASSWORD}
+          MYSQL_DB:
+            default: agent
+          OTLP_ENABLE:
+            default: "0"
+          KAFKA_ENABLE:
+            default: "0"
+          GET_LINK_URL:
+            default: http://${CORE_LINK_HOST}:18888/api/v1/tools
+          VERSIONS_LINK_URL:
+            default: http://${CORE_LINK_HOST}:18888/api/v1/tools/versions
+          RUN_LINK_URL:
+            default: http://${CORE_LINK_HOST}:18888/api/v1/tools/http_run
+          GET_WORKFLOWS_URL:
+            default: http://${CORE_WORKFLOW_HOST}:7880/sparkflow/v1/protocol/get
+          WORKFLOW_SSE_BASE_URL:
+            default: http://${CORE_WORKFLOW_HOST}:7880/workflow/v1
+          CHUNK_QUERY_URL:
+            default: http://${CORE_KNOWLEDGE_HOST}:20010/knowledge/v1/chunk/query
+          LIST_MCP_PLUGIN_URL:
+            default: http://${CORE_LINK_HOST}:18888/api/v1/mcp/tool_list
+          RUN_MCP_PLUGIN_URL:
+            default: http://${CORE_LINK_HOST}:18888/api/v1/mcp/call_tool
+          APP_AUTH_HOST:
+            default: ${CORE_TENANT_HOST}:5052
+          APP_AUTH_PROT:
+            default: http
+          APP_AUTH_API_KEY:
+            default: 7b709739e8da44536127a333c7603a83
+          APP_AUTH_SECRET:
+            default: NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy
+          CORE_AGENT_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+          CORE_AGENT_PORT:
+            default: "17870"
+            expose: true
+            readonly: true
+
+    # ===========================================================================
+    # Console Services
+    # ===========================================================================
+
+    - name: console-frontend
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - casdoor
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/console-frontend:latest
+        env:
+          CONSOLE_CASDOOR_URL:
+            default: ${CASDOOR_PUBLIC_URL}
+          CONSOLE_CASDOOR_ID:
+            default: astron-agent-client
+          CONSOLE_CASDOOR_APP:
+            default: astron-agent-app
+          CONSOLE_CASDOOR_ORG:
+            default: built-in
+          SPARK_APP_ID:
+            default: ${PLATFORM_APP_ID}
+          CONSOLE_FRONTEND_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+
+    - name: console-hub
+      icon: https://raw.githubusercontent.com/iflytek/astron-agent/main/docs/logo.svg
+      template: PREBUILT_V2
+      dependencies:
+        - postgresql
+        - mysql
+        - redis
+        - minio
+        - casdoor
+        - core-tenant
+        - core-database
+        - core-workflow
+        - core-link
+        - core-rpa
+        - core-knowledge
+        - core-agent
+      spec:
+        source:
+          image: ghcr.io/iflytek/astron-agent/console-hub:latest
+        env:
+          CONSOLE_CASDOOR_URL:
+            default: ${CASDOOR_PUBLIC_URL}
+          CONSOLE_CASDOOR_ID:
+            default: astron-agent-client
+          CONSOLE_CASDOOR_APP:
+            default: astron-agent-app
+          CONSOLE_CASDOOR_ORG:
+            default: built-in
+          CONSOLE_DOMAIN:
+            default: https://${PUBLIC_DOMAIN}
+          MYSQL_URL:
+            default: "jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/astron_console?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8&createDatabaseIfNotExist=true"
+          MYSQL_USER:
+            default: root
+          MYSQL_PASSWORD:
+            default: ${MYSQL_ROOT_PASSWORD}
+          REDIS_HOST:
+            default: ${REDIS_HOST}
+          REDIS_PORT:
+            default: ${REDIS_PORT}
+          REDIS_PASSWORD:
+            default: ${REDIS_PASSWORD}
+          REDIS_DATABASE_CONSOLE:
+            default: "1"
+          OSS_ENDPOINT:
+            default: http://${MINIO_HOST}:9000
+          OSS_REMOTE_ENDPOINT:
+            default: http://${MINIO_HOST}:9000
+          OSS_ACCESS_KEY_ID:
+            default: ${MINIO_ROOT_USER}
+          OSS_ACCESS_KEY_SECRET:
+            default: ${MINIO_ROOT_PASSWORD}
+          OSS_BUCKET_CONSOLE:
+            default: console-oss
+          OSS_PRESIGN_EXPIRY_SECONDS_CONSOLE:
+            default: "600"
+          OAUTH2_ISSUER_URI:
+            default: ${CASDOOR_PUBLIC_URL}
+          OAUTH2_JWK_SET_URI:
+            default: http://${CASDOOR_HOST}:8000/.well-known/jwks
+          OAUTH2_AUDIENCE:
+            default: astron-agent-client
+          PLATFORM_APP_ID:
+            default: ${PLATFORM_APP_ID}
+          PLATFORM_API_KEY:
+            default: ${PLATFORM_API_KEY}
+          PLATFORM_API_SECRET:
+            default: ${PLATFORM_API_SECRET}
+          AI_ABILITY_CHAT_BASE_URL:
+            default: https://spark-api-open.xf-yun.com/v1
+          AI_ABILITY_CHAT_MODEL:
+            default: ""
+          AI_ABILITY_CHAT_API_KEY:
+            default: ${PLATFORM_API_KEY}
+          SPARK_APP_ID:
+            default: ${PLATFORM_APP_ID}
+          SPARK_API_KEY:
+            default: ${PLATFORM_API_KEY}
+          SPARK_API_SECRET:
+            default: ${PLATFORM_API_SECRET}
+          SPARK_RTASR_APPID:
+            default: ${PLATFORM_APP_ID}
+          SPARK_RTASR_KEY:
+            default: ${PLATFORM_API_KEY}
+          SPARK_IMAGE_APP_ID:
+            default: ${PLATFORM_APP_ID}
+          SPARK_IMAGE_API_KEY:
+            default: ${PLATFORM_API_KEY}
+          SPARK_IMAGE_API_SECRET:
+            default: ${PLATFORM_API_SECRET}
+          TENANT_ID:
+            default: 680ab54f
+          TENANT_KEY:
+            default: 7b709739e8da44536127a333c7603a83
+          TENANT_SECRET:
+            default: NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy
+          COMMON_APPID:
+            default: 680ab54f
+          COMMON_APIKEY:
+            default: 7b709739e8da44536127a333c7603a83
+          COMMON_API_SECRET:
+            default: NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy
+          ADMIN_UID:
+            default: "9999"
+          APP_URL:
+            default: http://${CORE_TENANT_HOST}:5052/v2/app
+          KNOWLEDGE_URL:
+            default: http://${CORE_KNOWLEDGE_HOST}:20010/knowledge
+          TOOL_URL:
+            default: http://${CORE_LINK_HOST}:18888
+          TOOL_RPA_URL:
+            default: http://${CORE_RPA_HOST}:17198
+          WORKFLOW_URL:
+            default: http://${CORE_WORKFLOW_HOST}:7880
+          SPARK_DB_URL:
+            default: http://${CORE_DATABASE_HOST}:7990
+          RPA_URL:
+            default: https://newapi.iflyrpa.com
+          WORKFLOW_CHAT_URL:
+            default: http://${CORE_WORKFLOW_HOST}:7880/workflow/v1/chat/completions
+          WORKFLOW_DEBUG_URL:
+            default: http://${CORE_WORKFLOW_HOST}:7880/workflow/v1/debug/chat/completions
+          WORKFLOW_RESUME_URL:
+            default: http://${CORE_WORKFLOW_HOST}:7880/workflow/v1/resume
+          TENANT_CREATE_APP:
+            default: http://${CORE_TENANT_HOST}:5052/v2/app
+          TENANT_GET_APP_DETAIL:
+            default: http://${CORE_TENANT_HOST}:5052/v2/app/details
+          MAAS_APP_ID:
+            default: 680ab54f
+          MAAS_API_KEY:
+            default: 7b709739e8da44536127a333c7603a83
+          MAAS_API_SECRET:
+            default: NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy
+          MAAS_CONSUMER_ID:
+            default: 680ab54f
+          MAAS_CONSUMER_KEY:
+            default: 7b709739e8da44536127a333c7603a83
+          MAAS_CONSUMER_SECRET:
+            default: NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy
+          MAAS_PUBLISH_API:
+            default: http://${CORE_WORKFLOW_HOST}:7880/workflow/v1/publish
+          MAAS_AUTH_API:
+            default: http://${CORE_WORKFLOW_HOST}:7880/workflow/v1/auth
+          CONSOLE_HUB_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+            readonly: true
+
+    - name: nginx
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/nginx.svg
+      template: PREBUILT_V2
+      dependencies:
+        - console-frontend
+        - console-hub
+        - core-workflow
+      domainKey: PUBLIC_DOMAIN
+      spec:
+        source:
+          image: nginx:1.25-alpine
+        ports:
+          - id: web
+            port: 80
+            type: HTTP
+        volumes:
+          - id: logs
+            dir: /var/log/nginx
+        env:
+          CONSOLE_FRONTEND_HOST:
+            default: ${CONSOLE_FRONTEND_HOST}
+          CONSOLE_HUB_HOST:
+            default: ${CONSOLE_HUB_HOST}
+          CORE_WORKFLOW_HOST:
+            default: ${CORE_WORKFLOW_HOST}
+        configs:
+          - path: /etc/nginx/nginx.conf
+            template: |-
+              worker_processes auto;
+              worker_rlimit_nofile 65535;
+              
+              events {
+                  worker_connections 65535;
+                  multi_accept on;
+              }
+              
+              http {
+                  include       /etc/nginx/mime.types;
+                  default_type  application/octet-stream;
+              
+                  # Log format
+                  log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                                  '$status $body_bytes_sent "$http_referer" '
+                                  '"$http_user_agent" "$http_x_forwarded_for"';
+              
+                  # Access log
+                  access_log /var/log/nginx/access.log main;
+                  error_log /var/log/nginx/error.log warn;
+              
+                  # Basic configuration
+                  sendfile on;
+                  tcp_nopush on;
+                  tcp_nodelay on;
+                  keepalive_timeout 65;
+                  types_hash_max_size 2048;
+              
+                  # Upload size limit
+                  client_max_body_size 20m;
+              
+                  # Gzip compression
+                  gzip on;
+                  gzip_vary on;
+                  gzip_min_length 1000;
+                  gzip_types
+                      text/plain
+                      text/css
+                      text/xml
+                      text/javascript
+                      application/xml+rss
+                      application/javascript
+                      application/json;
+              
+                  server {
+                      listen 80;
+                      server_name localhost;
+              
+                      # Security headers
+                      add_header X-Frame-Options "SAMEORIGIN" always;
+                      add_header X-XSS-Protection "1; mode=block" always;
+                      add_header X-Content-Type-Options "nosniff" always;
+              
+                      # Runtime config - no cache (dynamic config file)
+                      location = /runtime-config.js {
+                          proxy_pass http://${CONSOLE_FRONTEND_HOST}:1881;
+                          proxy_set_header Host $host;
+                          proxy_set_header X-Real-IP $remote_addr;
+                          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                          proxy_set_header X-Forwarded-Proto $scheme;
+              
+                          # Disable caching for runtime config
+                          expires -1;
+                          add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
+                          add_header Pragma "no-cache";
+                      }
+              
+                      # Static resource caching
+                      location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                          proxy_pass http://${CONSOLE_FRONTEND_HOST}:1881;
+                          proxy_set_header Host $host;
+                          proxy_set_header X-Real-IP $remote_addr;
+                          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                          proxy_set_header X-Forwarded-Proto $scheme;
+              
+                          expires 1y;
+                          add_header Cache-Control "public, immutable";
+                      }
+              
+                      # SSE (Server-Sent Events) API proxy for workflow chat completions
+                      location /workflow/v1/chat/completions {
+                          proxy_pass http://${CORE_WORKFLOW_HOST}:7880/workflow/v1/chat/completions;
+                          proxy_set_header Host $host;
+                          proxy_set_header X-Real-IP $remote_addr;
+                          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                          proxy_set_header X-Forwarded-Proto $scheme;
+              
+                          # SSE specific settings
+                          proxy_buffering off;                    # Disable buffering for real-time data transmission
+                          proxy_cache off;                        # Disable caching
+                          proxy_set_header Connection '';         # SSE uses persistent connections
+                          proxy_http_version 1.1;                 # Use HTTP/1.1
+                          chunked_transfer_encoding on;           # Enable chunked transfer encoding
+              
+                          # Prevent nginx from buffering responses
+                          proxy_set_header X-Accel-Buffering no;
+              
+                          # Timeout settings - SSE requires long-lived connections
+                          proxy_connect_timeout 60s;
+                          proxy_send_timeout 1800s;                # 30 minutes send timeout
+                          proxy_read_timeout 1800s;                # 30 minutes read timeout
+              
+                          # Set correct headers for SSE
+                          add_header Cache-Control 'no-cache';
+                          add_header X-Accel-Buffering 'no';
+                      }
+              
+                      # SSE (Server-Sent Events) API proxy for chat messages
+                      location /console-api/chat-message/ {
+                          proxy_pass http://${CONSOLE_HUB_HOST}:8080/chat-message/;
+                          proxy_set_header Host $host;
+                          proxy_set_header X-Real-IP $remote_addr;
+                          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                          proxy_set_header X-Forwarded-Proto $scheme;
+              
+                          # SSE specific settings
+                          proxy_buffering off;                    # Disable buffering for real-time data transmission
+                          proxy_cache off;                        # Disable caching
+                          proxy_set_header Connection '';         # SSE uses persistent connections
+                          proxy_http_version 1.1;                 # Use HTTP/1.1
+                          chunked_transfer_encoding on;           # Enable chunked transfer encoding
+              
+                          # Prevent nginx from buffering responses
+                          proxy_set_header X-Accel-Buffering no;
+              
+                          # Timeout settings - SSE requires long-lived connections
+                          proxy_connect_timeout 60s;
+                          proxy_send_timeout 1800s;                # 30 minutes send timeout
+                          proxy_read_timeout 1800s;                # 30 minutes read timeout
+              
+                          # Set correct headers for SSE
+                          add_header Cache-Control 'no-cache';
+                          add_header X-Accel-Buffering 'no';
+                      }
+              
+                      # Backend API proxy - proxy /console-api path to console-hub
+                      location /console-api/ {
+                          proxy_pass http://${CONSOLE_HUB_HOST}:8080/;
+                          proxy_set_header Host $host;
+                          proxy_set_header X-Real-IP $remote_addr;
+                          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                          proxy_set_header X-Forwarded-Proto $scheme;
+              
+                          # Timeout settings
+                          proxy_connect_timeout 30s;
+                          proxy_send_timeout 30s;
+                          proxy_read_timeout 30s;
+                      }
+              
+                      # Frontend application proxy - default proxy to console-frontend
+                      location / {
+                          proxy_pass http://${CONSOLE_FRONTEND_HOST}:1881;
+                          proxy_set_header Host $host;
+                          proxy_set_header X-Real-IP $remote_addr;
+                          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                          proxy_set_header X-Forwarded-Proto $scheme;
+              
+                          # Timeout settings
+                          proxy_connect_timeout 30s;
+                          proxy_send_timeout 30s;
+                          proxy_read_timeout 30s;
+                      }
+              
+                      # Health check
+                      location /nginx-health {
+                          access_log off;
+                          return 200 "nginx is healthy\n";
+                          add_header Content-Type text/plain;
+                      }
+                  }
+              }
+            envsubst: true
+
+localization:
+  zh-CN:
+    description: >-
+      企业级开源AI智能体开发平台，集成AI工作流编排、模型管理、AI与MCP工具集成、
+      RPA自动化和团队协作功能。由科大讯飞构建。
+    variables:
+      - key: PUBLIC_DOMAIN
+        type: DOMAIN
+        name: 应用域名
+        description: 访问 Astron Agent Web 应用的域名。
+      - key: CASDOOR_DOMAIN
+        type: DOMAIN
+        name: Casdoor 认证域名
+        description: Casdoor 认证服务的域名（用于 OAuth2 登录）。
+      - key: PLATFORM_APP_ID
+        type: STRING
+        name: 讯飞开放平台 App ID
+        description: 讯飞开放平台（https://console.xfyun.cn）的 App ID，AI 能力必需。
+      - key: PLATFORM_API_KEY
+        type: STRING
+        name: 讯飞开放平台 API Key
+        description: 讯飞开放平台（https://console.xfyun.cn）的 API Key。
+      - key: PLATFORM_API_SECRET
+        type: STRING
+        name: 讯飞开放平台 API Secret
+        description: 讯飞开放平台（https://console.xfyun.cn）的 API Secret。
+    readme: |-
+      # Astron Agent
+
+      Astron Agent 是由科大讯飞构建的**企业级商用友好**开源 AI 智能体开发平台，
+      集成了 AI 工作流编排、模型管理、AI 与 MCP 工具集成、RPA 自动化和团队协作功能。
+
+      ## 部署前准备
+
+      部署前，您需要：
+      1. 在[讯飞开放平台](https://console.xfyun.cn)注册账号并获取：
+         - App ID（PLATFORM_APP_ID）
+         - API Key（PLATFORM_API_KEY）
+         - API Secret（PLATFORM_API_SECRET）
+      2. 准备两个域名：一个用于主应用，一个用于 Casdoor 认证服务。
+
+      ## 部署步骤
+
+      1. 填写讯飞开放平台凭证。
+      2. 绑定两个域名：一个用于主应用（nginx），一个用于 Casdoor 认证。
+      3. 部署完成后，访问您的 Casdoor 域名。
+         - 默认账号：用户名 `admin`，密码 `123`
+      4. 访问主应用域名即可使用 Astron Agent。
+
+      ## 默认登录信息
+
+      - **Casdoor 管理员**：用户名 `admin`，密码 `123`（登录后请立即修改）
+
+      ## 许可证
+
+      Apache 2.0 — 详情请参阅 [GitHub 仓库](https://github.com/iflytek/astron-agent)

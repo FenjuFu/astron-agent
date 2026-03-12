@@ -45,7 +45,7 @@
 
 ## 🚀 快速开始
 
-我们提供两种部署方式，满足不同场景需求:
+我们提供三种部署方式，满足不同场景需求:
 
 ### 方式一：Docker Compose（推荐快速体验）
 
@@ -83,7 +83,21 @@ docker compose -f docker-compose-with-auth.yaml up -d
 **说明**
 - Casdoor默认的登录账户名：`admin`，密码：`123`
 
-### 方式二：Helm（适用于 Kubernetes 环境）
+### 方式二：Zeabur（一键云端部署）
+
+通过 [Zeabur](https://zeabur.com) 一键部署星辰 Agent：
+
+[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/ASTRONAGENT)
+
+**部署前**，您需要：
+1. 在[讯飞开放平台](https://console.xfyun.cn)注册账号，获取 App ID、API Key 和 API Secret。
+2. 准备两个域名：一个用于主应用，一个用于 Casdoor 认证服务。
+
+**部署完成后**，通过以下地址访问：
+- **应用**：您绑定的主应用域名
+- **Casdoor 认证**：您绑定的 Casdoor 域名（默认账号：`admin` / `123`）
+
+### 方式三：Helm（适用于 Kubernetes 环境）
 
 > 🚧 **注意**：Helm charts 正在完善中，敬请期待！
 
