@@ -27,7 +27,7 @@ spec:
     - key: PLATFORM_APP_ID
       type: STRING
       name: Platform App ID
-      description: App ID for the AI platform (e.g., iFLYTEK). Leave empty if not using iFLYTEK.
+      description: App ID for the AI platform (e.g., iFLYTEK). 
     - key: PLATFORM_API_KEY
       type: STRING
       name: Platform API Key
