@@ -44,7 +44,7 @@ The platform supports **high-availability** deployment, enabling organizations t
 
 ## 🚀 Quick Start
 
-We offer two deployment methods to meet different scenarios:
+We offer three deployment methods to meet different scenarios:
 
 ### Option 1: Docker Compose (Recommended for Quick Start)
 
