@@ -100,20 +100,21 @@ class IFlyAuditAPI(AuditAPI):
 
         :raises ValueError: If required environment variables are missing
         """
-        self.app_id = os.getenv("IFLYTEK_AUDIT_APP_ID", "")
-        self.access_key_id = os.getenv("IFLYTEK_AUDIT_ACCESS_KEY_ID", "")
-        self.access_key_secret = os.getenv("IFLYTEK_AUDIT_ACCESS_KEY_SECRET", "")
+        self.app_id = os.getenv("PLATFORM_APP_ID", "")
+        self.access_key_id = os.getenv("PLATFORM_API_KEY", "")
+        self.access_key_secret = os.getenv("PLATFORM_API_SECRET", "")
+        # Default points to the iFlyTek audit API; override with AUDIT_HOST for other providers
         self.hosts = os.getenv(
-            "IFLYTEK_AUDIT_HOST", "http://audit-api.xfyun.cn/v1.0"
+            "AUDIT_HOST", "http://audit-api.xfyun.cn/v1.0"
         ).split(",")
 
         missing = []
         if not self.app_id:
-            missing.append("IFLYTEK_AUDIT_APP_ID")
+            missing.append("PLATFORM_APP_ID")
         if not self.access_key_id:
-            missing.append("IFLYTEK_AUDIT_ACCESS_KEY_ID")
+            missing.append("PLATFORM_API_KEY")
         if not self.access_key_secret:
-            missing.append("IFLYTEK_AUDIT_ACCESS_KEY_SECRET")
+            missing.append("PLATFORM_API_SECRET")
 
         if missing and int(os.getenv("AUDIT_ENABLE", "0")) == 1:
             raise ValueError(
