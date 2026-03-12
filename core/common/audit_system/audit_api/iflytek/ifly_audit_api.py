@@ -53,23 +53,24 @@ class IFlyAuditAPI(AuditAPI):
     audit_name = "IFlyAuditAPI"
 
     def __init__(self) -> None:
-        self.app_id = os.getenv("IFLYTEK_AUDIT_APP_ID", "")
-        self.access_key_id = os.getenv("IFLYTEK_AUDIT_ACCESS_KEY_ID", "")
-        self.access_key_secret = os.getenv("IFLYTEK_AUDIT_ACCESS_KEY_SECRET", "")
+        self.app_id = os.getenv("PLATFORM_APP_ID", "")
+        self.access_key_id = os.getenv("PLATFORM_API_KEY", "")
+        self.access_key_secret = os.getenv("PLATFORM_API_SECRET", "")
+        # Default points to the iFlyTek audit API; override with AUDIT_HOST for other providers
         self.hosts = os.getenv(
-            "IFLYTEK_AUDIT_HOST", "http://audit-api.xfyun.cn/v1.0"
+            "AUDIT_HOST", "http://audit-api.xfyun.cn/v1.0"
         ).split(",")
 
         missing = []
         if not self.app_id:
-            missing.append("IFLYTEK_AUDIT_APP_ID")
+            missing.append("PLATFORM_APP_ID")
         if not self.access_key_id:
-            missing.append("IFLYTEK_AUDIT_ACCESS_KEY_ID")
+            missing.append("PLATFORM_API_KEY")
         if not self.access_key_secret:
-            missing.append("IFLYTEK_AUDIT_ACCESS_KEY_SECRET")
+            missing.append("PLATFORM_API_SECRET")
 
         if missing:
-            raise ValueError(f"缺少必要环境变量: {', '.join(missing)}")
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
     def _signature(self, query_param: dict) -> str:
         sorted_params = OrderedDict(sorted(query_param.items()))
