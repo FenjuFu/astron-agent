@@ -27,11 +27,11 @@ spec:
     - key: PLATFORM_APP_ID
       type: STRING
       name: Platform App ID
-      description: App ID for the AI platform (e.g., iFLYTEK). 
+      description: App ID for the AI platform (if applicable). 
     - key: PLATFORM_API_KEY
       type: STRING
       name: Platform API Key
-      description: API Key for the AI platform.
+      description: API Key for the AI platform (if applicable).
     - key: PLATFORM_API_SECRET
       type: STRING
       name: Platform API Secret
@@ -2070,3 +2070,77 @@ localization:
       ## 许可证
 
       Apache 2.0 — 详情请参阅 [GitHub 仓库](https://github.com/iflytek/astron-agent)
+  zh-TW:
+    description: >-
+      企業級開源 AI 智能體開發平台，集成 AI 工作流編排、模型管理、AI 與 MCP 工具集成、
+      RPA 自動化和團隊協作功能。由科大訊飛構建。
+    variables:
+      - key: PUBLIC_DOMAIN
+        type: DOMAIN
+        name: 應用網域
+        description: 訪問 Astron Agent Web 應用的網域。
+      - key: CASDOOR_DOMAIN
+        type: DOMAIN
+        name: Casdoor 認證網域
+        description: Casdoor 認證服務的網域（用於 OAuth2 登入）。
+      - key: PLATFORM_APP_ID
+        type: STRING
+        name: 平台 App ID
+        description: AI 平台 App ID（如訊飛開放平台）。如果不使用訊飛，請留空。
+      - key: PLATFORM_API_KEY
+        type: STRING
+        name: 平台 API Key
+        description: AI 平台 API Key。
+      - key: PLATFORM_API_SECRET
+        type: STRING
+        name: 平台 API Secret
+        description: AI 平台 API Secret。
+      - key: SPARK_API_PASSWORD
+        type: STRING
+        name: 星火 API Password
+        description: 星火 API 密碼（如適用）。
+      - key: SPARK_RTASR_API_KEY
+        type: STRING
+        name: 星火實時語音轉寫 API Key
+        description: 星火實時語音轉寫 API Key（如適用）。
+      - key: AI_ABILITY_CHAT_BASE_URL
+        type: STRING
+        name: AI 對話 Base URL
+        description: AI 對話能力 Base URL（兼容 OpenAI 協議）。
+      - key: AI_ABILITY_CHAT_MODEL
+        type: STRING
+        name: AI 對話模型
+        description: AI 對話能力模型 ID。
+      - key: AI_ABILITY_CHAT_API_KEY
+        type: STRING
+        name: AI 對話 API Key
+        description: AI 對話能力 API Key。
+    readme: |-
+      # Astron Agent
+      
+      Astron Agent 是由科大訊飛構建的**企業級商用友好**開源 AI 智能體開發平台，
+      集成了 AI 工作流編排、模型管理、AI 與 MCP 工具集成、RPA 自動化和團隊協作功能。
+      
+      ## 部署前準備
+      
+      部署前，您需要：
+      1. 配置您的 AI 平台憑證。您可以使用訊飛開放平台或其他兼容 OpenAI 協議的服務。
+         - 訊飛：PLATFORM_APP_ID, PLATFORM_API_KEY, PLATFORM_API_SECRET
+         - 通用 OpenAI 兼容服務：AI_ABILITY_CHAT_BASE_URL, AI_ABILITY_CHAT_MODEL, AI_ABILITY_CHAT_API_KEY
+      2. 準備兩個網域：一個用於主應用，一個用於 Casdoor 認證服務。
+      
+      ## 部署步驟
+      
+      1. 在變數部分填寫您的 AI 平台憑證。
+      2. 綁定兩個網域：一個用於主應用（nginx），一個用於 Casdoor 認證。
+      3. 部署完成後，訪問您的 Casdoor 網域。
+         - 預設帳號：使用者名稱 `admin`，密碼 `123`
+      4. 訪問主應用網域即可使用 Astron Agent。
+      
+      ## 預設登入資訊
+      
+      - **Casdoor 管理員**：使用者名稱 `admin`，密碼 `123`（登入後請立即修改）
+      
+      ## 許可證
+      
+      Apache 2.0 — 詳情請參閱 [GitHub 倉庫](https://github.com/iflytek/astron-agent)
