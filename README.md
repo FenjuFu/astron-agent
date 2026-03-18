@@ -83,11 +83,13 @@ After startup, you can access the services at the following addresses:
 **Note**
 - Default Casdoor login credentials: username: `admin`, password: `123`
 
-### Option 2: Zeabur (One-Click Cloud Deployment)
+### Option 2: Zeabur (Cloud Deployment)
 
-Deploy Astron Agent instantly on [Zeabur](https://zeabur.com) with a single click:
+Deploy Astron Agent on [Zeabur](https://zeabur.com) using the [Zeabur CLI](https://zeabur.com/docs/deploy/deploy-button):
 
-[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/ASTRONAGENT)
+```bash
+npx zeabur@latest template deploy -f zeabur.yaml
+```
 
 **Before deploying**, you will need:
 1. An account on the [iFLYTEK Open Platform](https://console.xfyun.cn) to obtain your App ID, API Key, and API Secret.

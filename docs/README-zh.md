@@ -84,11 +84,13 @@ docker compose -f docker-compose-with-auth.yaml up -d
 **说明**
 - Casdoor默认的登录账户名：`admin`，密码：`123`
 
-### 方式二：Zeabur（一键云端部署）
+### 方式二：Zeabur（云端部署）
 
-通过 [Zeabur](https://zeabur.com) 一键部署星辰 Agent：
+通过 [Zeabur CLI](https://zeabur.com/docs/deploy/deploy-button) 将星辰 Agent 部署到 [Zeabur](https://zeabur.com)：
 
-[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/ASTRONAGENT)
+```bash
+npx zeabur@latest template deploy -f zeabur.yaml
+```
 
 **部署前**，您需要：
 1. 在[讯飞开放平台](https://console.xfyun.cn)注册账号，获取 App ID、API Key 和 API Secret。
