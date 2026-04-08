@@ -158,9 +158,11 @@ vim .env
 
 ### Step 4: Start astronAgent Core Services (Required Deployment Step)
 
-#### 4.1 Configure iFLYTEK Open Platform APP_ID, API_KEY, and Related Information
+#### 4.1 Configure Open Platform APP_ID, API_KEY, and Related Information (Optional)
 
-For documentation, see: https://www.xfyun.cn/doc/platform/quickguide.html
+> **Note:** This configuration is optional. The core services can run without these credentials. Configure them only if you need specific AI capabilities such as Spark LLM, speech recognition, image generation, or virtual human features.
+
+If you wish to enable these capabilities, you can obtain the credentials from your open platform provider. For iFLYTEK Open Platform, see: https://www.xfyun.cn/doc/platform/quickguide.html
 
 After creating your application, you may need to purchase or claim API authorization service quotas for the corresponding capabilities:
 - Spark LLM API: https://xinghuo.xfyun.cn/sparkapi

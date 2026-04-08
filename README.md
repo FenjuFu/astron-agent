@@ -90,7 +90,7 @@ Deploy Astron Agent instantly on [Zeabur](https://zeabur.com) with a single clic
 [![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/ASTRONAGENT)
 
 **Before deploying**, you will need:
-1. An account on the [iFLYTEK Open Platform](https://console.xfyun.cn) to obtain your App ID, API Key, and API Secret.
+1. (Optional) If you want to use AI capabilities (e.g., Spark LLM, speech recognition, image generation), you can obtain your `PLATFORM_APP_ID`, `PLATFORM_API_KEY`, and `PLATFORM_API_SECRET` from an open platform provider such as the [iFLYTEK Open Platform](https://console.xfyun.cn).
 2. Two domains: one for the main application and one for the Casdoor authentication service.
 
 **After deploying**, access the services at:
