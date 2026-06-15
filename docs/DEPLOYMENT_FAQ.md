@@ -66,5 +66,5 @@ Use the following checklist step by step. Back up important data before performi
 
 ## Related Documentation
 
-- [Deployment Guide With Auth](/en/DEPLOYMENT_GUIDE_WITH_AUTH)
-- [Deployment Guide Without Auth](/en/DEPLOYMENT_GUIDE)
+- [Deployment Guide With Auth](/DEPLOYMENT_GUIDE_WITH_AUTH)
+- [Deployment Guide Without Auth](/DEPLOYMENT_GUIDE)

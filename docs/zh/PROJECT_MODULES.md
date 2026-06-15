@@ -6,7 +6,7 @@
 
 ## 项目架构图
 
-![Astron Agent Architecture](./imgs/arch.png)
+![Astron Agent Architecture](../imgs/arch.png)
 
 ---
 
@@ -378,9 +378,9 @@ External Services（外部服务）
 
 ## 相关文档
 
-- [项目主页 README](../README-zh.md)
-- [部署指南](./DEPLOYMENT_GUIDE_zh.md)
-- [配置说明](./CONFIGURATION_zh.md)
+- [项目主页 README](./README.md)
+- [部署指南](./DEPLOYMENT_GUIDE.md)
+- [配置说明](./CONFIGURATION.md)
 - [Agent 开发指南](../core/agent/CLAUDE.md)
 - [前端开发指南](../console/frontend/CLAUDE.md)
 

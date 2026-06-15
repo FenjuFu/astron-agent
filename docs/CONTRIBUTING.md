@@ -102,7 +102,7 @@ Pre-commit will automatically run on every commit to:
 - Scan for secrets (gitleaks)
 - Validate commit message format
 
-For detailed usage instructions, see the [Pre-commit Usage Guide](/en/PRE-COMMIT).
+For detailed usage instructions, see the [Pre-commit Usage Guide](/PRE-COMMIT).
 
 ## Project Structure
 
@@ -217,7 +217,7 @@ pre-commit run eslint-check --all-files
 pre-commit run golangci-lint --all-files
 ```
 
-For more details, see the [Pre-commit Usage Guide](/en/PRE-COMMIT).
+For more details, see the [Pre-commit Usage Guide](/PRE-COMMIT).
 
 ## Testing Guidelines
 
@@ -418,11 +418,11 @@ Contributors will be recognized in:
 
 ## Additional Resources
 
-- [Pre-commit Usage Guide](/en/PRE-COMMIT)
+- [Pre-commit Usage Guide](/PRE-COMMIT)
 - [Branch and Commit Standards](https://github.com/iflytek/astron-agent/blob/main/.github/quality-requirements/branch-commit-standards.md)
 - [Code Quality Requirements](https://github.com/iflytek/astron-agent/blob/main/.github/quality-requirements/code-requirements.md)
-- [Makefile Usage Guide](/en/Makefile-readme)
-- [Project README](/en/README)
+- [Makefile Usage Guide](/Makefile-readme)
+- [Project README](/README)
 
 ## Questions?
 

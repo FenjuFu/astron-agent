@@ -25,7 +25,7 @@ git pull
 docker compose -f docker-compose-with-auth.yaml pull
 
 # 重新按照部署文档配置启动
-# 请参考 DEPLOYMENT_GUIDE_WITH_AUTH_zh.md 进行配置和启动
+# 请参考 DEPLOYMENT_GUIDE_WITH_AUTH.md（docs/zh/） 进行配置和启动
 ```
 
 ### 注意事项
@@ -66,5 +66,5 @@ docker compose -f docker-compose-with-auth.yaml pull
 
 ## 相关文档
 
-- [部署指南（带认证）](./DEPLOYMENT_GUIDE_WITH_AUTH_zh.md)
-- [部署指南（不带认证）](./DEPLOYMENT_GUIDE_zh.md)
+- [部署指南（带认证）](./DEPLOYMENT_GUIDE_WITH_AUTH.md)
+- [部署指南（不带认证）](./DEPLOYMENT_GUIDE.md)

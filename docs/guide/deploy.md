@@ -1,41 +1,42 @@
-# 部署指南
+# Deployment Overview
 
-Astron Agent 当前更适合按「先快速体验、再逐步生产化」的方式接入。本页提供部署方式选型和文档入口，避免一开始就在大量细节中迷路。
+Astron Agent is easiest to adopt in two phases: get a working environment up first, then move toward production-grade deployment and operations. This page helps you choose the right path and jump into the detailed references.
 
-## 部署方式
+## Deployment Paths
 
 ### Docker Compose
 
-适合本地体验、功能验证和小规模团队联调。
+Best for local evaluation, functional validation, and small-team integration work.
 
-- 优点：启动快、上手门槛低、适合本地和测试环境
-- 典型场景：产品演示、研发联调、初次验证架构链路
-- 推荐入口：[快速开始](/guide/quick-start)
+- Benefits: fast startup, low setup cost, ideal for local and test environments
+- Typical use cases: demos, developer collaboration, first architecture validation
+- Suggested entry: [Quick Start](/guide/quick-start)
 
 ### Helm / Kubernetes
 
-适合后续面向生产环境的标准化部署与扩容。
+Best for standardized production deployment, scaling, and long-term operations.
 
-- 优点：更适合多实例、弹性伸缩和统一运维
-- 典型场景：企业集群部署、持续交付、环境隔离
-- 相关目录：`helm/`
+- Benefits: better for multi-instance rollout, elasticity, and unified operations
+- Typical use cases: enterprise clusters, CI/CD, environment isolation
+- Related directory: `helm/`
 
-## 部署前准备
+## What To Decide Before Deployment
 
-- 准备数据库、缓存、对象存储等基础设施
-- 确认模型接入方式和密钥管理策略
-- 根据是否需要登录鉴权，选择标准部署或带鉴权部署
-- 明确是否需要接入 RPA、插件和租户能力
+- Prepare database, cache, and object storage dependencies
+- Confirm model access strategy and secret management
+- Decide whether authentication is required
+- Evaluate whether you need RPA, plugin, and tenant capabilities
 
-## 推荐阅读
+## Recommended References
 
-- [带鉴权部署指南](/DEPLOYMENT_GUIDE_WITH_AUTH_zh)
-- [带鉴权与 RPA 部署指南](/DEPLOYMENT_GUIDE_WITH_AUTH_RPA)
-- [标准部署指南](/DEPLOYMENT_GUIDE_zh)
-- [配置说明](/guide/config)
+- [Auth Deployment Guide](/DEPLOYMENT_GUIDE_WITH_AUTH)
+- [Auth + RPA Deployment Guide](/DEPLOYMENT_GUIDE_WITH_AUTH_RPA)
+- [Full Deployment Guide](/DEPLOYMENT_GUIDE)
+- [Deployment FAQ](/DEPLOYMENT_FAQ)
+- [Configuration Reference](/CONFIGURATION)
 
-## 常见选择建议
+## Typical Guidance
 
-- 只想尽快跑起来：优先 Docker Compose
-- 需要统一身份认证：优先带鉴权部署文档
-- 计划进入生产环境：结合 Helm、配置说明和 FAQ 一起评估
+- Need the fastest path: start with Docker Compose
+- Need unified identity: review the authentication-related deployment docs first
+- Planning production rollout: combine deployment, configuration, and FAQ together

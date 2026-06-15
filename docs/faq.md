@@ -1,33 +1,33 @@
 # FAQ
 
-本页作为文档站的常见问题入口，优先回答接入和部署阶段最容易遇到的问题。
+This page answers the most common questions users run into when they first open the documentation site or start deployment work.
 
-## 现在的 Pages 站点是什么结构
+## What Powers The GitHub Pages Site
 
-当前站点已经从“直接发布 `website/` 静态目录”切换为“先构建文档站，再发布构建产物”。首页保留品牌视觉，具体内容通过 Markdown 文档持续维护。
+The Pages site no longer publishes the legacy `website/` directory directly. It now builds the VitePress docs site under `docs/` and publishes the generated static output.
 
-## 为什么要改成文档站
+## Why Was The Site Moved To VitePress
 
-- 文档可以按目录维护，而不是继续堆在单个 HTML 里
-- 首页、指南、配置、FAQ 可以自然拆分
-- GitHub Pages 和 Vercel 都只需要发布静态产物
-- 后续补导航、搜索和更多章节的成本更低
+- Documentation can be maintained by directory instead of one large HTML file
+- Homepage, guides, configuration, and FAQ can evolve independently
+- GitHub Pages and Vercel only need to publish static build artifacts
+- Navigation, search, and future sections are easier to extend
 
-## 需要改 GitHub Pages 设置吗
+## Do I Need To Change GitHub Pages Settings
 
-需要确认仓库的 `Settings -> Pages` 中使用 `GitHub Actions` 作为发布方式。工作流会自动构建并上传文档站产物目录。
+Yes. The repository Pages settings should use `GitHub Actions` as the deployment source so the workflow can build and upload the docs output directory.
 
-## 本地怎么预览文档站
+## How Do I Preview The Docs Locally
 
-在 `docs/` 目录执行：
+Run the following inside `docs/`:
 
 ```bash
 npm install
 npm run docs:dev
 ```
 
-## 完整问题排查去哪里看
+## Where Should I Go For Deeper Troubleshooting
 
-- [仓库根目录 FAQ](https://github.com/iflytek/astron-agent/blob/main/FAQ.md)
+- [Repository FAQ](https://github.com/iflytek/astron-agent/blob/main/FAQ.md)
 - [GitHub Discussions](https://github.com/iflytek/astron-agent/discussions)
 - [GitHub Issues](https://github.com/iflytek/astron-agent/issues)

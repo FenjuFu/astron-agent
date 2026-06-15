@@ -96,7 +96,7 @@ const zhContent = {
   quickStartCards: {
     firstTitle: "1. 阅读快速开始",
     firstText: "先完成本地体验，再按需要切换到生产部署和配置章节。",
-    firstCode: "docs/guide/quick-start.md\ndocs/guide/deploy.md\ndocs/guide/config.md",
+    firstCode: "docs/zh/guide/quick-start.md\ndocs/zh/guide/deploy.md\ndocs/zh/guide/config.md",
     secondTitle: "2. 进入文档目录",
     secondText: "文档站支持侧边栏导航、全文搜索和静态构建，适合持续补充内容。",
     primaryAction: "开始阅读",
@@ -227,7 +227,7 @@ const enContent = {
   quickStartCards: {
     firstTitle: "1. Start With The Guide",
     firstText: "Get a local environment running first, then move on to deployment and configuration details as needed.",
-    firstCode: "docs/en/guide/quick-start.md\ndocs/en/guide/deploy.md\ndocs/en/guide/config.md",
+    firstCode: "docs/guide/quick-start.md\ndocs/guide/deploy.md\ndocs/guide/config.md",
     secondTitle: "2. Explore The Docs",
     secondText: "The docs site provides sidebar navigation, local search, and static builds that are easy to maintain over time.",
     primaryAction: "Read The Docs",
@@ -277,10 +277,10 @@ const enContent = {
 const isEnglish = computed(() => lang.value === "en-US");
 const content = computed(() => (isEnglish.value ? enContent : zhContent));
 const localeSwitchLabel = computed(() => (isEnglish.value ? "简体中文" : "English"));
-const localeSwitchHref = computed(() => withBase(isEnglish.value ? "/" : "/en/"));
+const localeSwitchHref = computed(() => withBase(isEnglish.value ? "/zh/" : "/"));
 
 const localizePath = (path: string) => {
-  const localePrefix = isEnglish.value ? "/en" : "";
+  const localePrefix = isEnglish.value ? "" : "/zh";
   const normalizedPath = path === "/" ? "/" : path;
   return withBase(`${localePrefix}${normalizedPath}`);
 };

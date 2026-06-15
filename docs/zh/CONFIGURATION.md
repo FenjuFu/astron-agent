@@ -6,7 +6,7 @@
 
 ### 必须手动配置的关键字段
 
-在使用 Docker Compose 部署之前，以下环境变量**必须手动配置**。详细的配置步骤和说明请参考 [部署指南](https://github.com/iflytek/astron-agent/blob/main/docs/DEPLOYMENT_GUIDE_zh.md)。
+在使用 Docker Compose 部署之前，以下环境变量**必须手动配置**。详细的配置步骤和说明请参考 [部署指南](https://github.com/iflytek/astron-agent/blob/main/docs/zh/DEPLOYMENT_GUIDE.md)。
 
 **关键配置项概览**：
 
@@ -314,8 +314,8 @@
 
 ## 相关文档
 
-- [部署指南](./DEPLOYMENT_GUIDE_zh.md) - 详细的部署步骤说明
-- [快速启动](../README.md) - 快速启动指南
+- [部署指南](./DEPLOYMENT_GUIDE.md) - 详细的部署步骤说明
+- [快速启动](./README.md) - 快速启动指南
 
 ## 贡献
 
