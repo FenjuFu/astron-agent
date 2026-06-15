@@ -102,7 +102,7 @@ Pre-commit 将在每次提交时自动运行：
 - 扫描敏感信息（gitleaks）
 - 验证提交消息格式
 
-详细使用说明请参阅 [Pre-commit 使用指南](docs/PRE-COMMIT_zh.md)。
+详细使用说明请参阅 [Pre-commit 使用指南](./PRE-COMMIT.md)。
 
 ## 项目结构
 
@@ -217,7 +217,7 @@ pre-commit run eslint-check --all-files
 pre-commit run golangci-lint --all-files
 ```
 
-详细信息请参阅 [Pre-commit 使用指南](docs/PRE-COMMIT_zh.md)。
+详细信息请参阅 [Pre-commit 使用指南](./PRE-COMMIT.md)。
 
 ## 测试指南
 
@@ -418,7 +418,7 @@ docs(guide): 完善快速开始指南
 
 ## 其他资源
 
-- [Pre-commit 使用指南](PRE-COMMIT_zh.md)
+- [Pre-commit 使用指南](PRE-COMMIT.md)
 - [分支与提交规范](../.github/quality-requirements/branch-commit-standards-zh.md)
 - [代码质量要求](../.github/quality-requirements/code-requirements-zh.md)
 - [Makefile 使用指南](Makefile-readme-zh.md)

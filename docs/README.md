@@ -1,4 +1,4 @@
-[![Astron_Readme](../imgs/Astron_Readme.png)](https://agent.xfyun.cn)
+[![Astron_Readme](./imgs/Astron_Readme.png)](https://agent.xfyun.cn)
 
 <div align="center">
 
@@ -6,7 +6,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/iflytek/astron-agent?style=social)](https://github.com/iflytek/astron-agent/stargazers)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/iflytek/astron-agent)
 
-[English](/en/README) | [简体中文](/README-zh)
+[English](/README) | [简体中文](/zh/README)
 
 </div>
 
@@ -62,7 +62,7 @@ cp .env.example .env
 vim .env
 ```
 
-For environment variable configuration, please refer to the documentation: [DEPLOYMENT_GUIDE_WITH_AUTH.md](/en/DEPLOYMENT_GUIDE_WITH_AUTH#step-2-configure-astronagent-environment-variables)
+For environment variable configuration, please refer to the documentation: [DEPLOYMENT_GUIDE_WITH_AUTH.md](/DEPLOYMENT_GUIDE_WITH_AUTH#step-2-configure-astronagent-environment-variables)
 
 ```bash
 # Start all services (including Casdoor)
@@ -94,7 +94,7 @@ After startup, you can access the services at the following addresses:
 
 ---
 
-> 📖 For complete deployment instructions and configuration details, see [Deployment Guide](/en/DEPLOYMENT_GUIDE_WITH_AUTH)
+> 📖 For complete deployment instructions and configuration details, see [Deployment Guide](/DEPLOYMENT_GUIDE_WITH_AUTH)
 
 ## 📖 Using Astron Cloud
 
@@ -104,9 +104,9 @@ After startup, you can access the services at the following addresses:
 
 ## 📚 Documentation
 
-- [🚀 Deployment Guide](/en/DEPLOYMENT_GUIDE)
-- [🔧 Configuration](/en/CONFIGURATION)
-- [🏢 Case Studies](/en/cases/)
+- [🚀 Deployment Guide](/DEPLOYMENT_GUIDE)
+- [🔧 Configuration](/CONFIGURATION)
+- [🏢 Case Studies](/cases/)
 - [🚀 Quick Start](https://www.xfyun.cn/doc/spark/Agent02-%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B.html)
 - [📘 Development Guide](https://www.xfyun.cn/doc/spark/Agent03-%E5%BC%80%E5%8F%91%E6%8C%87%E5%8D%97.html#_1-%E6%8C%87%E4%BB%A4%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E5%BC%80%E5%8F%91)
 - [📖 Tutorial](https://scn5s6198j3j.feishu.cn/wiki/VefnwvPbridJBikCUb1cYXO9nYb)
@@ -117,7 +117,7 @@ After startup, you can access the services at the following addresses:
 
 ## 🤝 Contributing
 
-We welcome contributions of all kinds! Please see our [Contributing Guide](/en/CONTRIBUTING)
+We welcome contributions of all kinds! Please see our [Contributing Guide](/CONTRIBUTING)
 
 ## 🌟 Star History
 
@@ -132,7 +132,7 @@ We welcome contributions of all kinds! Please see our [Contributing Guide](/en/C
 - 👥 WeChat Work Group:
 
 <div align="center">
-  <img src="../imgs/WeCom_Group.png" alt="WeChat Work Group" width="300">
+  <img src="./imgs/WeCom_Group.png" alt="WeChat Work Group" width="300">
 </div>
 
 ## 📄 Open Source License

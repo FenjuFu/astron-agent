@@ -1,42 +1,42 @@
-# 配置说明
+# Configuration Overview
 
-本页收敛 Astron Agent 接入时最常见的配置关注点，帮助你快速判断应该优先看哪些配置文档。
+This page summarizes the most important configuration domains so you can quickly decide which detailed reference to read next.
 
-## 重点配置域
+## Key Configuration Areas
 
-### 基础设施
+### Infrastructure
 
-- 数据库与缓存
-- 对象存储
-- 网络与反向代理
-- 容器运行环境
+- Databases and caches
+- Object storage
+- Networking and reverse proxy
+- Container runtime environment
 
-### 模型与 AI 能力
+### Models And AI Capabilities
 
-- 模型网关或 MaaS 接入参数
-- API Key 与鉴权信息
-- 能力开关与模型路由策略
+- Model gateway or MaaS connection settings
+- API keys and authentication details
+- Capability switches and routing strategies
 
-### 平台能力
+### Platform Capabilities
 
-- MCP 和外部工具调用配置
-- RPA 相关执行环境
-- 多租户、空间和团队能力
+- MCP and external tool integration
+- RPA execution environment
+- Multi-tenant, space, and team capabilities
 
-### 鉴权与安全
+### Authentication And Security
 
-- Casdoor 等身份系统接入
-- 环境变量管理
-- 生产环境密钥注入和权限边界
+- Casdoor and identity integration
+- Environment variable management
+- Secret injection and permission boundaries in production
 
-## 推荐阅读
+## Recommended References
 
-- [配置文档](/CONFIGURATION_zh)
-- [带鉴权部署指南](/DEPLOYMENT_GUIDE_WITH_AUTH_zh)
-- [模块说明](/PROJECT_MODULES_zh)
+- [Configuration Reference](/CONFIGURATION)
+- [Auth Deployment Guide](/DEPLOYMENT_GUIDE_WITH_AUTH)
+- [Project Modules](/PROJECT_MODULES)
 
-## 配置建议
+## Suggested Order
 
-1. 先完成最小可运行配置
-2. 再补充生产环境依赖和密钥管理
-3. 最后根据业务场景接入 MCP、RPA 和扩展模块
+1. Finish the minimum runnable configuration
+2. Add production dependencies and secret management
+3. Extend MCP, RPA, and optional modules for your business scenario
