@@ -10,7 +10,7 @@ Astron Agent 当前更适合按「先快速体验、再逐步生产化」的方�
 
 - 优点：启动快、上手门槛低、适合本地和测试环境
 - 典型场景：产品演示、研发联调、初次验证架构链路
-- 推荐入口：[快速开始](/guide/quick-start)
+- 推荐入口：[快速开始](/zh/guide/quick-start)
 
 ### Helm / Kubernetes
 
@@ -30,9 +30,9 @@ Astron Agent 当前更适合按「先快速体验、再逐步生产化」的方�
 ## 推荐阅读
 
 - [带鉴权部署指南](/zh/DEPLOYMENT_GUIDE_WITH_AUTH)
-- [带鉴权与 RPA 部署指南](/DEPLOYMENT_GUIDE_WITH_AUTH_RPA)
+- [带鉴权与 RPA 部署指南](/zh/DEPLOYMENT_GUIDE_WITH_AUTH_RPA)
 - [标准部署指南](/zh/DEPLOYMENT_GUIDE)
-- [配置说明](/guide/config)
+- [配置说明](/zh/guide/config)
 
 ## 常见选择建议
 

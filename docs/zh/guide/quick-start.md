@@ -20,7 +20,7 @@ cp .env.example .env
 
 完成复制后，按需补充模型、数据库、对象存储和鉴权相关配置。
 
-## 2. 启动服务
+### 2. 启动服务
 
 ```bash
 docker compose -f docker-compose-with-auth.yaml up -d
@@ -33,12 +33,12 @@ docker compose -f docker-compose-with-auth.yaml up -d
 
 ## 推荐阅读顺序
 
-1. 先读 [部署指南](/guide/deploy)
-2. 再读 [配置说明](/guide/config)
-3. 遇到问题时查看 [FAQ](/faq)
+1. 先读 [部署指南](/zh/guide/deploy)
+2. 再读 [配置说明](/zh/guide/config)
+3. 遇到问题时查看 [FAQ](/zh/faq)
 
 ## 深入文档
 
-- [中文 README](/README-zh)
+- [中文 README](/zh/README)
 - [带鉴权部署指南](/zh/DEPLOYMENT_GUIDE_WITH_AUTH)
 - [标准部署指南](/zh/DEPLOYMENT_GUIDE)

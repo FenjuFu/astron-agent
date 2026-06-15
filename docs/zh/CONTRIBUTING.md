@@ -421,8 +421,8 @@ docs(guide): 完善快速开始指南
 - [Pre-commit 使用指南](PRE-COMMIT.md)
 - [分支与提交规范](../.github/quality-requirements/branch-commit-standards-zh.md)
 - [代码质量要求](../.github/quality-requirements/code-requirements-zh.md)
-- [Makefile 使用指南](Makefile-readme-zh.md)
-- [项目 README](../README.md)
+- [Makefile 使用指南](Makefile-readme.md)
+- [项目 README](./README.md)
 
 ## 有问题？
 
