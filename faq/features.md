@@ -61,7 +61,7 @@ module_id varchar(50) DEFAULT NULL ）。
 
 ## 支持自定义 MCP (Model Context Protocol) 工具吗？
 
-支持。可以在 Web 端的工作流节点（如 Agent 智能决策节点）中添加和配置 MCP 工具。目前 MCP 主要在 Agent 节点中作为工具使用，把 MCP 当作独立的工具节点使用的能力尚未开放。
+支持。MCP 既可以作为独立的「MCP 节点」直接加入工作流，也可以在 Agent 智能决策节点里作为工具添加和配置。
 
 ## 知识库（RAG）引用有问题，无法检索或回答？
 
@@ -84,19 +84,25 @@ module_id varchar(50) DEFAULT NULL ）。
 
 ## 智能体发布需要人工审核吗？
 
-不需要。开源版与现网的星辰智能体不同，智能体调试通过后即可直接发布，没有审核流程。删除已发布的智能体需先下架/下线，再在“我的智能体”卡片中删除。
+是否需要审核取决于所在空间：
+
+- 个人空间（免费版 / 专业版）：不需要审核，调试通过后即可直接发布。
+- 团队 / 企业空间：所有者（Owner）和管理员（Admin）可直接发布；普通成员（Member）发布到智能体市场或 API 渠道时，需经所有者或管理员审核通过后才会上架。
 
 ## 工作流的运行机制是怎样的？Java 和 Python 各负责什么？
 
-- Java (Core): 负责管理层 API，包括 CRUD、用户认证、配置管理等。
+- Java (Console 后端 / hub 模块): 负责管理层 API，包括 CRUD、用户认证、配置管理等。
 - Python (Workflow Service): 负责工作流引擎的实际执行，解析工作流逻辑并调度节点。
 
-两者连接同一个数据库。
+两者默认运行在同一个 MySQL 实例上，但各自使用独立的数据库（Console 用 astron_console，工作流服务用 workflow）。
 
 ## 开源版工作流有可观测性 / Trace 吗？
 
-- 调试阶段有运行追踪。
-- 工作流发布后正式运行时暂无可观测性 / Trace（现网官方版本有）。如有需要可在 GitHub 提 feature，会根据需求和优先级排期。
+有，默认未开启，按以下步骤启用：
+
+1. 在 docker-compose.yaml 中取消 elasticsearch、kibana、kafka、logstash 四个组件容器的注释。
+2. 将环境变量 KAFKA_ENABLE 置为 1。
+3. 重新启动项目，即可在工作流的 Trace 日志中查看对应的调用链路。
 
 ## 怎么使用https协议访问项目？
 
