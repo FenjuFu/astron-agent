@@ -22,7 +22,16 @@ import { useLocaleStore } from '@/store/spark-store/locale-store';
 import SpeakerModal, { MyVCNItem, VcnItem } from '@/components/speaker-modal';
 import UploadBackgroundModal from '@/components/upload-background';
 import Personality from './personality-component';
-import { RightOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import {
+  ApiOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  DeleteOutlined,
+  LinkOutlined,
+  PlusOutlined,
+  RightOutlined,
+  QuestionCircleOutlined,
+} from '@ant-design/icons';
 
 import settingFile from '@/assets/imgs/sparkImg/icon_bot_setting_file.png';
 import settingKaichangbai from '@/assets/imgs/sparkImg/icon_bot_setting_kaichangbai.png';
@@ -41,11 +50,12 @@ import { useTranslation } from 'react-i18next';
 import styles from './CapabilityDevelopment.module.scss';
 import cls from 'classnames';
 import { CheckboxChangeEvent } from 'antd/es/checkbox';
+import { isValidMcpServerUrl } from '../mcp-url-config';
 
 const { TextArea } = Input;
 
 interface CapabilityDevelopmentProps {
-  viewMode?: 'full' | 'personalization' | 'knowledge';
+  viewMode?: 'full' | 'personalization' | 'knowledge' | 'capability';
   botCreateActiveV: any;
   setBotCreateActiveV: (v: any) => void;
   baseinfo: any;
@@ -63,6 +73,8 @@ interface CapabilityDevelopmentProps {
   setSupportContextFlag: (v: boolean) => void;
   tools: any[];
   setTools: (v: any[]) => void;
+  mcpServerUrls: string[];
+  setMcpServerUrls: (v: string[]) => void;
   files: any[];
   tree: any[];
   setTree: (v: any[]) => void;
@@ -97,6 +109,8 @@ const CapabilityDevelopment: React.FC<CapabilityDevelopmentProps> = props => {
     setSupportContextFlag,
     tools,
     setTools,
+    mcpServerUrls,
+    setMcpServerUrls,
     files,
     tree,
     setTree,
@@ -324,11 +338,39 @@ const CapabilityDevelopment: React.FC<CapabilityDevelopmentProps> = props => {
   }, [dataSource]);
 
   const showCapabilitySection = viewMode === 'full';
-  const showKnowledgeSection = viewMode === 'full' || viewMode === 'knowledge';
+  const showKnowledgeSection =
+    viewMode === 'full' ||
+    viewMode === 'knowledge' ||
+    viewMode === 'capability';
+  const showMcpSection = viewMode === 'full' || viewMode === 'capability';
   const showPersonalizationSection =
     viewMode === 'full' || viewMode === 'personalization';
   const showSupportContextSwitch = viewMode === 'full';
   const isScopedMode = viewMode !== 'full';
+
+  const displayedMcpServerUrls =
+    mcpServerUrls.length > 0 ? mcpServerUrls : [''];
+  const selectedKnowledgeCount = selectSource?.length || 0;
+  const configuredMcpServerCount = mcpServerUrls.filter(url =>
+    isValidMcpServerUrl(url.trim())
+  ).length;
+
+  const updateMcpServerUrl = (index: number, value: string) => {
+    const nextUrls = [...displayedMcpServerUrls];
+    nextUrls[index] = value;
+    setMcpServerUrls(nextUrls);
+  };
+
+  const addMcpServerUrl = () => {
+    setMcpServerUrls([...displayedMcpServerUrls, '']);
+  };
+
+  const removeMcpServerUrl = (index: number) => {
+    const nextUrls = displayedMcpServerUrls.filter((_, itemIndex) => {
+      return itemIndex !== index;
+    });
+    setMcpServerUrls(nextUrls.length > 0 ? nextUrls : []);
+  };
 
   return (
     <div
@@ -455,39 +497,67 @@ const CapabilityDevelopment: React.FC<CapabilityDevelopmentProps> = props => {
         </>
       )}
       {showKnowledgeSection && (
-        <div className={showCapabilitySection ? 'mt-[52px]' : ''}>
-          <div className="w-full font-medium text-second">
-            <div
-              className="flex items-center"
-              style={{ marginBottom: '20px', justifyContent: 'space-between' }}
-            >
-              {multiModelDebugging && (
-                <img
-                  src={growOrShrinkConfig?.knowledges ? arrowDown : arrowUp}
-                  className="w-[16px] h-[16px] mr-2 cursor-pointer"
-                  alt=""
-                  onClick={() =>
-                    setGrowOrShrinkConfig({
-                      ...growOrShrinkConfig,
-                      knowledges: !growOrShrinkConfig.knowledges,
-                    })
-                  }
-                />
-              )}
-              <div style={{ display: 'flex' }}>
-                <img src={settingFile} className="w-6 h-6" alt="" />
-                <span className="text-[#13A10E] font-medium ml-2">
-                  {t('configBase.CapabilityDevelopment.knowledgeBase')}
+        <div
+          className={cls(
+            styles.capabilitySection,
+            showCapabilitySection && styles.capabilitySectionOffset
+          )}
+        >
+          <div className={styles.capabilityBlock}>
+            <div className={styles.capabilityBlockHeader}>
+              <div className={styles.capabilityTitleGroup}>
+                {multiModelDebugging && (
+                  <img
+                    src={growOrShrinkConfig?.knowledges ? arrowDown : arrowUp}
+                    className={styles.capabilityCollapseIcon}
+                    alt=""
+                    onClick={() =>
+                      setGrowOrShrinkConfig({
+                        ...growOrShrinkConfig,
+                        knowledges: !growOrShrinkConfig.knowledges,
+                      })
+                    }
+                  />
+                )}
+                <span
+                  className={cls(styles.capabilityIcon, styles.knowledgeIcon)}
+                >
+                  <img src={settingFile} alt="" />
                 </span>
+                <div>
+                  <div className={styles.capabilityTitleRow}>
+                    <span className={styles.capabilityTitle}>
+                      {t('configBase.CapabilityDevelopment.knowledgeBase')}
+                    </span>
+                    <span
+                      className={cls(
+                        styles.capabilityStatus,
+                        selectedKnowledgeCount > 0
+                          ? styles.statusReady
+                          : styles.statusMuted
+                      )}
+                    >
+                      {selectedKnowledgeCount > 0
+                        ? `已关联 ${selectedKnowledgeCount} 个`
+                        : '未关联'}
+                    </span>
+                  </div>
+                  <div className={styles.capabilityDescription}>
+                    关联知识库后，智能体会在调试会话中按需检索私有知识。
+                  </div>
+                </div>
               </div>
-              <div
+              <Button
+                icon={<PlusOutlined />}
+                className={styles.capabilityActionButton}
                 onClick={() => {
                   setVisible(true);
                 }}
-                style={{ color: '#6356EA', cursor: 'pointer' }}
               >
-                + {t('configBase.CapabilityDevelopment.addKnowledgeBase')}
-              </div>
+                {selectedKnowledgeCount > 0
+                  ? '管理知识库'
+                  : t('configBase.CapabilityDevelopment.addKnowledgeBase')}
+              </Button>
             </div>
             <Modal
               wrapClassName={styles.datasetModalWrap}
@@ -744,6 +814,22 @@ const CapabilityDevelopment: React.FC<CapabilityDevelopmentProps> = props => {
                 </div>
               </div>
             )}
+            {selectedKnowledgeCount === 0 && (
+              <button
+                type="button"
+                className={styles.capabilityEmptyState}
+                onClick={() => {
+                  setVisible(true);
+                }}
+              >
+                <span className={styles.capabilityEmptyTitle}>
+                  暂无关联知识库
+                </span>
+                <span className={styles.capabilityEmptyDescription}>
+                  点击添加知识库，为智能体补充可检索的业务资料。
+                </span>
+              </button>
+            )}
           </div>
           {growOrShrinkConfig.knowledges && files.length > 0 && (
             <div className="mt-1.5 w-full overflow-auto max-h-[300px]">
@@ -770,6 +856,113 @@ const CapabilityDevelopment: React.FC<CapabilityDevelopmentProps> = props => {
               ))}
             </div>
           )}
+        </div>
+      )}
+      {showMcpSection && (
+        <div
+          className={cls(
+            styles.capabilitySection,
+            showKnowledgeSection && styles.capabilitySectionCompact
+          )}
+        >
+          <div className={styles.capabilityBlock}>
+            <div className={styles.capabilityBlockHeader}>
+              <div className={styles.capabilityTitleGroup}>
+                <span className={cls(styles.capabilityIcon, styles.mcpIcon)}>
+                  <ApiOutlined />
+                </span>
+                <div>
+                  <div className={styles.capabilityTitleRow}>
+                    <span className={styles.capabilityTitle}>MCP Server</span>
+                    <span
+                      className={cls(
+                        styles.capabilityStatus,
+                        configuredMcpServerCount > 0
+                          ? styles.statusReady
+                          : styles.statusMuted
+                      )}
+                    >
+                      {configuredMcpServerCount > 0
+                        ? `已配置 ${configuredMcpServerCount} 个`
+                        : '未配置'}
+                    </span>
+                  </div>
+                  <div className={styles.capabilityDescription}>
+                    接入外部 MCP 工具，模型会根据工具描述自主选择调用。
+                  </div>
+                </div>
+              </div>
+              <Button
+                icon={<PlusOutlined />}
+                className={styles.capabilityActionButton}
+                onClick={addMcpServerUrl}
+              >
+                添加 MCP Server URL
+              </Button>
+            </div>
+            <div className={styles.mcpServerList}>
+              {displayedMcpServerUrls.map((url, index) => {
+                const trimmedUrl = url.trim();
+                const invalidUrl =
+                  trimmedUrl.length > 0 && !isValidMcpServerUrl(trimmedUrl);
+                const isConfigured = trimmedUrl.length > 0 && !invalidUrl;
+
+                return (
+                  <div className={styles.mcpServerRow} key={index}>
+                    <div className={styles.mcpServerMeta}>
+                      <span className={styles.mcpServerName}>
+                        Server {index + 1}
+                      </span>
+                      <span
+                        className={cls(
+                          styles.mcpServerState,
+                          isConfigured && styles.mcpServerStateReady,
+                          invalidUrl && styles.mcpServerStateError
+                        )}
+                      >
+                        {isConfigured ? (
+                          <CheckCircleOutlined />
+                        ) : invalidUrl ? (
+                          <CloseCircleOutlined />
+                        ) : (
+                          <LinkOutlined />
+                        )}
+                        {isConfigured
+                          ? '可用'
+                          : invalidUrl
+                            ? '格式错误'
+                            : '待填写'}
+                      </span>
+                    </div>
+                    <div className={styles.mcpInputWrap}>
+                      <Input
+                        aria-label={`MCP Server URL ${index + 1}`}
+                        value={url}
+                        status={invalidUrl ? 'error' : undefined}
+                        placeholder="https://example.com/mcp"
+                        onChange={event =>
+                          updateMcpServerUrl(index, event.target.value)
+                        }
+                      />
+                    </div>
+                    <Tooltip title="删除">
+                      <Button
+                        aria-label={`删除 MCP Server ${index + 1}`}
+                        className={styles.mcpDeleteButton}
+                        icon={<DeleteOutlined />}
+                        onClick={() => removeMcpServerUrl(index)}
+                      />
+                    </Tooltip>
+                    {invalidUrl && (
+                      <div className={styles.mcpErrorText}>
+                        请输入 http 或 https 开头的 MCP Server URL
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
       {showPersonalizationSection && (
