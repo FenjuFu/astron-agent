@@ -2,8 +2,6 @@ package com.iflytek.astron.console.commons.util;
 
 import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.exception.BusinessException;
-import io.minio.BucketExistsArgs;
-import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.GetPresignedObjectUrlArgs;
 import java.io.ByteArrayInputStream;
@@ -11,14 +9,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.time.Duration;
-import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.condition.DisabledIf;
-import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -35,13 +31,11 @@ import org.springframework.test.util.ReflectionTestUtils;
  * for negative testing (default: invalid-user) - MINIO_INVALID_SECRET_KEY: Invalid secret key for
  * negative testing (default: invalid-secret)
  *
- * Note: If MinIO service is unavailable, some tests will be skipped
+ * Note: If MinIO service or credentials are unavailable, related tests will be skipped
  */
 class S3ClientUtilTest {
 
     private S3ClientUtil s3ClientUtil;
-    private MockedStatic<MinioClient> minioClientMock;
-    private MinioClient mockedMinioClient;
 
     // MinIO test environment configuration - from environment variables
     // TEST_ENDPOINT is used for actual MinIO connection (internal)
@@ -64,10 +58,21 @@ class S3ClientUtilTest {
             .getOrDefault("MINIO_INVALID_SECRET_KEY",
                     "invalid-secret");
 
-    private static boolean minioAvailable = true;
+    private static boolean minioAvailable = checkMinioAvailable();
 
-    static {
-        // Check MinIO availability at class loading time
+    private static S3ClientUtil newConfiguredS3ClientUtil(boolean enablePublicRead) {
+        S3ClientUtil clientUtil = new S3ClientUtil();
+        ReflectionTestUtils.setField(clientUtil, "endpoint", TEST_ENDPOINT);
+        ReflectionTestUtils.setField(clientUtil, "remoteEndpoint", TEST_REMOTE_ENDPOINT);
+        ReflectionTestUtils.setField(clientUtil, "accessKey", TEST_ACCESS_KEY);
+        ReflectionTestUtils.setField(clientUtil, "secretKey", TEST_SECRET_KEY);
+        ReflectionTestUtils.setField(clientUtil, "defaultBucket", TEST_BUCKET);
+        ReflectionTestUtils.setField(clientUtil, "presignExpirySeconds", 600);
+        ReflectionTestUtils.setField(clientUtil, "enablePublicRead", enablePublicRead);
+        return clientUtil;
+    }
+
+    private static boolean checkMinioAvailable() {
         try {
             URL url = new URL(TEST_ENDPOINT + "/minio/health/live");
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
@@ -79,80 +84,36 @@ class S3ClientUtilTest {
             connection.disconnect();
 
             if (responseCode != 200) {
-                minioAvailable = false;
                 System.out.println("Warning: MinIO service is unavailable, related tests will be skipped");
+                return false;
             }
+
+            newConfiguredS3ClientUtil(true).init();
+            return true;
         } catch (Exception e) {
-            minioAvailable = false;
-            System.out.println("Warning: MinIO service is unavailable, related tests will be skipped");
+            System.out.println("Warning: MinIO service or credentials are unavailable, related tests will be skipped");
+            return false;
         }
     }
 
     @BeforeEach
-    void setUp() throws Exception {
-        // Mock MinioClient.builder() to return a mocked client
-        mockedMinioClient = Mockito.mock(MinioClient.class);
-        minioClientMock = Mockito.mockStatic(MinioClient.class);
-        MinioClient.Builder mockBuilder = Mockito.mock(MinioClient.Builder.class);
-        minioClientMock.when(MinioClient::builder).thenReturn(mockBuilder);
-        Mockito.when(mockBuilder.endpoint(Mockito.anyString())).thenReturn(mockBuilder);
-        Mockito.when(mockBuilder.credentials(Mockito.anyString(), Mockito.anyString())).thenReturn(mockBuilder);
-        Mockito.when(mockBuilder.region(Mockito.anyString())).thenReturn(mockBuilder);
-        Mockito.when(mockBuilder.httpClient(Mockito.any())).thenReturn(mockBuilder);
-        Mockito.when(mockBuilder.build()).thenReturn(mockedMinioClient);
+    void setUp(TestInfo testInfo) {
+        s3ClientUtil = newConfiguredS3ClientUtil(true);
 
-        s3ClientUtil = new S3ClientUtil();
+        if (!minioAvailable) {
+            return;
+        }
 
-        // Use real MinIO test environment configuration
-        // endpoint: for internal connection (MinioClient)
-        // remoteEndpoint: for URL generation (external access)
-        ReflectionTestUtils.setField(s3ClientUtil, "endpoint", TEST_ENDPOINT);
-        ReflectionTestUtils.setField(s3ClientUtil, "remoteEndpoint", TEST_REMOTE_ENDPOINT);
-        ReflectionTestUtils.setField(s3ClientUtil, "accessKey", TEST_ACCESS_KEY);
-        ReflectionTestUtils.setField(s3ClientUtil, "secretKey", TEST_SECRET_KEY);
-        ReflectionTestUtils.setField(s3ClientUtil, "defaultBucket", TEST_BUCKET);
-        ReflectionTestUtils.setField(s3ClientUtil, "presignExpirySeconds", 600);
-        ReflectionTestUtils.setField(s3ClientUtil, "enablePublicRead", false);
-
-        // Initialize - with mocked MinioClient, this should succeed without real MinIO
         try {
             s3ClientUtil.init();
         } catch (BusinessException e) {
-            // If initialization still fails, mark MinIO as unavailable
             minioAvailable = false;
             System.out.println(
                     "Warning: MinIO service is unavailable during initialization, related tests will be skipped");
-        }
-    }
-
-    @AfterEach
-    void tearDown() {
-        if (minioClientMock != null) {
-            minioClientMock.close();
-        }
-    }
-
-    private void ensureBucketExists() throws Exception {
-        OkHttpClient httpClient = new OkHttpClient.Builder()
-                .connectTimeout(Duration.ofSeconds(2))
-                .writeTimeout(Duration.ofSeconds(2))
-                .readTimeout(Duration.ofSeconds(2))
-                .build();
-
-        MinioClient client = MinioClient.builder()
-                .endpoint(TEST_ENDPOINT)
-                .credentials(TEST_ACCESS_KEY, TEST_SECRET_KEY)
-                .httpClient(httpClient)
-                .build();
-
-        boolean bucketExists = client.bucketExists(BucketExistsArgs.builder()
-                .bucket(TEST_BUCKET)
-                .build());
-
-        if (!bucketExists) {
-            client.makeBucket(MakeBucketArgs.builder()
-                    .bucket(TEST_BUCKET)
-                    .build());
+            boolean minioRequired = testInfo.getTestMethod()
+                    .map(method -> method.isAnnotationPresent(DisabledIf.class))
+                    .orElse(false);
+            Assumptions.assumeFalse(minioRequired, "MinIO service is unavailable");
         }
     }
 
@@ -308,7 +269,7 @@ class S3ClientUtilTest {
     @Test
     @DisabledIf("isMinioUnavailable")
     void uploadObject_withDefaultBucket_success() {
-        // Additional runtime check since @DisabledIf is evaluated at class loading time
+        // Additional runtime check since the static availability flag is initialized at class loading time
         if (isMinioUnavailable()) {
             System.out.println("Skipping test - MinIO is unavailable");
             return;
@@ -910,14 +871,11 @@ class S3ClientUtilTest {
 
         String objectKey = "test/offline_presign.txt";
 
-        // Execute test - this should NOT throw exception or hang
-        long start = System.currentTimeMillis();
+        // Execute test - this should use the injected presign client without network access
         String url = offlineS3ClientUtil.generatePresignedPutUrl(TEST_BUCKET, objectKey, 600);
-        long duration = System.currentTimeMillis() - start;
 
         Assertions.assertNotNull(url);
         Assertions.assertTrue(url.startsWith(nonRoutableEndpoint));
-        Assertions.assertTrue(duration < 1000,
-                "Presign generation took too long (" + duration + "ms), possibly attempted network call");
+        Mockito.verify(mockPresignClient).getPresignedObjectUrl(Mockito.any(GetPresignedObjectUrlArgs.class));
     }
 }
