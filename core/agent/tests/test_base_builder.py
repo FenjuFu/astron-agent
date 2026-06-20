@@ -136,9 +136,12 @@ class TestBaseApiBuilder:
             ],
         )
 
-        assert len(plugins) == 1
-        assert plugins[0].typ == "skill"
-        assert plugins[0].name == "read_skill_skill-1"
+        assert len(plugins) == 2
+        assert [plugin.typ for plugin in plugins] == ["skill", "skill"]
+        assert [plugin.name for plugin in plugins] == [
+            "read_skill_skill-1",
+            "run_skill_skill-1",
+        ]
 
     @pytest.mark.asyncio
     async def test_build_plugins_filters_empty_mcp_urls(
