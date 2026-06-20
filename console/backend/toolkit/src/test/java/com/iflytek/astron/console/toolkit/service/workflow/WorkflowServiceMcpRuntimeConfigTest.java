@@ -9,6 +9,7 @@ import com.iflytek.astron.console.toolkit.common.constant.WorkflowConst;
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.BizWorkflowData;
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.BizWorkflowNode;
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.node.BizNodeData;
+import com.iflytek.astron.console.toolkit.service.skill.SkillEnrichmentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,12 +28,16 @@ class WorkflowServiceMcpRuntimeConfigTest {
     @Mock
     private ChatBotBaseMapper chatBotBaseMapper;
 
+    @Mock
+    private SkillEnrichmentService skillEnrichmentService;
+
     private WorkflowService workflowService;
 
     @BeforeEach
     void setUp() {
         workflowService = new WorkflowService();
         ReflectionTestUtils.setField(workflowService, "chatBotBaseMapper", chatBotBaseMapper);
+        ReflectionTestUtils.setField(workflowService, "skillEnrichmentService", skillEnrichmentService);
     }
 
     @Test

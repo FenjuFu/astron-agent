@@ -98,11 +98,12 @@ class RagflowRAGStrategy(RAGStrategy):
     async def _resolve_dataset_id(
         self,
         dataset_id_input: Optional[str],
+        group: Optional[str] = None,
     ) -> Optional[str]:
         """Return requested dataset id or the default dataset id."""
         if dataset_id_input:
             return dataset_id_input
-        default_name = RagflowUtils.get_default_dataset_name()
+        default_name = group or RagflowUtils.get_default_dataset_name()
         return await RagflowUtils.ensure_dataset(default_name)
 
     def _build_retrieval_payload(
@@ -339,7 +340,9 @@ class RagflowRAGStrategy(RAGStrategy):
 
         try:
             # Step 1: Resolve dataset
-            dataset_id = await self._resolve_dataset_id(kwargs.get(_DATASET_ID_KWARG))
+            dataset_id = await self._resolve_dataset_id(
+                kwargs.get(_DATASET_ID_KWARG), kwargs.get("group")
+            )
             if not dataset_id:
                 raise CustomException(
                     CodeEnum.RAGFLOW_RAGError,
