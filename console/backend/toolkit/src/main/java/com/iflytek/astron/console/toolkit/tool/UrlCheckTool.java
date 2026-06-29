@@ -98,6 +98,10 @@ public class UrlCheckTool {
         try {
             URL u = toSafeHttpUrl(url);
             ensurePublicAddresses(u.getHost());
+            List<String> domainWhiteList = readCsvConfig(DOMAIN_WHITE_CATEGORY);
+            if (!isHostInDomainAllowList(u.getHost(), domainWhiteList)) {
+                throw new BusinessException(ResponseEnum.TOOLBOX_URL_ILLEGAL);
+            }
             URLConnection urlConnection = u.openConnection();
             if (!(urlConnection instanceof HttpURLConnection httpURLConnection)) {
                 throw new BusinessException(ResponseEnum.TOOLBOX_URL_HTTP_HTTPS_ONLY);
@@ -470,6 +474,23 @@ public class UrlCheckTool {
     }
 
     private record RedirectLookupResult(int statusCode, String location) {}
+
+    private boolean isHostInDomainAllowList(String host, List<String> domainWhiteList) {
+        if (StringUtils.isBlank(host) || domainWhiteList == null || domainWhiteList.isEmpty()) {
+            return false;
+        }
+        String normalizedHost = StringUtils.lowerCase(StringUtils.trim(host), Locale.ROOT);
+        for (String allowed : domainWhiteList) {
+            String normalizedAllowed = StringUtils.lowerCase(StringUtils.trimToEmpty(allowed), Locale.ROOT);
+            if (normalizedAllowed.isEmpty()) {
+                continue;
+            }
+            if (normalizedHost.equals(normalizedAllowed) || normalizedHost.endsWith("." + normalizedAllowed)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private URL toSafeHttpUrl(String url) throws IOException {
         try {
