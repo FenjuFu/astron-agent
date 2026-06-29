@@ -6,6 +6,7 @@ import useUserStore, { UserState } from '@/store/user-store';
 import { useEnterprise } from './hooks/use-enterprise';
 import { useSpaceType } from './hooks/use-space-type';
 import i18n from './i18n';
+import { getAppPathname } from '@/utils/base-path';
 
 export default function App(): ReactElement {
   const getUserInfo = useUserStore((state: UserState) => state.getUserInfo);
@@ -17,7 +18,7 @@ export default function App(): ReactElement {
 
   const initSpaceInfo = useCallback(async () => {
     try {
-      const pathname = window.location.pathname.replace(/\/+$/, '');
+      const pathname = getAppPathname().replace(/\/+$/, '');
       if (pathname === '/space' && isTeamSpace()) {
         switchToPersonal({ isJump: false });
         return;
@@ -45,7 +46,7 @@ export default function App(): ReactElement {
   }, [i18n.language]);
 
   useEffect(() => {
-    const pathname = window.location.pathname.replace(/\/+$/, '');
+    const pathname = getAppPathname().replace(/\/+$/, '');
     if (pathname === '/callback') return; // 避免在回调页时发起鉴权相关请求
     getUserInfo();
     initSpaceInfo();

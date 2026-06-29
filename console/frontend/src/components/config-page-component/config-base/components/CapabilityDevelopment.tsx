@@ -54,6 +54,7 @@ import { isValidMcpServerUrl } from '../mcp-url-config';
 import SkillSelectModal from './SkillSelectModal';
 import PluginSelectModal from './PluginSelectModal';
 import type { AgentSkill } from '@/types/skill';
+import { withAppBasePath } from '@/utils/base-path';
 
 const { TextArea } = Input;
 
@@ -724,7 +725,9 @@ const CapabilityDevelopment: React.FC<CapabilityDevelopmentProps> = props => {
                 <div
                   style={{ display: 'flex' }}
                   className={styles.go_create}
-                  onClick={() => window.open('/resource/knowledge')}
+                  onClick={() =>
+                    window.open(withAppBasePath('/resource/knowledge'))
+                  }
                 >
                   <img
                     src="https://aixfyun-cn-bj.xfyun.cn/bbs/27965.529211835106/%E6%96%B0%E5%A2%9E.svg"
@@ -760,7 +763,7 @@ const CapabilityDevelopment: React.FC<CapabilityDevelopmentProps> = props => {
                         (item: any) => item.checked
                       );
                       setSelectSource(filterSource);
-                    } else window.open('/resource/knowledge');
+                    } else window.open(withAppBasePath('/resource/knowledge'));
                   }}
                 >
                   {dataSource?.length > 0

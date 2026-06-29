@@ -4,6 +4,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import CrashErrorComponent from '@/components/crash-error-component';
 import Sidebar from '@/components/sidebar';
 import Header from '@/components/header';
+import { withAppBasePath } from '@/utils/base-path';
 
 const hasHeaderList = [
   'knowledge',
@@ -102,7 +103,7 @@ const BasicLayout: FC<BasicLayoutProps> = ({ showHeader }) => {
   return (
     <ErrorBoundary
       onReset={() => {
-        window.location.href = '/';
+        window.location.href = withAppBasePath('/');
       }}
       FallbackComponent={CrashErrorComponent}
     >

@@ -12,6 +12,7 @@ import useSpaceStore from '@/store/space-store';
 import { useTranslation } from 'react-i18next';
 import { DraggerProps } from 'antd/es/upload';
 import { getFixedUrl } from '@/components/workflow/utils';
+import { withAppBasePath } from '@/utils/base-path';
 
 export const useImportData = ({
   tag,
@@ -78,7 +79,7 @@ export const useImportData = ({
     // 检查特定状态码，跳转到 /space.agent
     if (res.code === 80001 || res.code === 80004 || res.desc == '空间不存在') {
       message.error(res.desc, 3, () => {
-        window.location.href = '/space/agent';
+        window.location.href = withAppBasePath('/space/agent');
       });
       return;
     }

@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { useEffect } from 'react';
 import { casdoorSdk } from '@/config';
+import { withAppBasePath } from '@/utils/base-path';
 
 const CallbackPage = (): ReactElement => {
   useEffect(() => {
@@ -21,9 +22,10 @@ const CallbackPage = (): ReactElement => {
       } catch {
         // 失败也跳回主页或来源页，由上层决定后续处理
       } finally {
-        const redirect = sessionStorage.getItem('postLoginRedirect') || '/';
+        const redirect =
+          sessionStorage.getItem('postLoginRedirect') || withAppBasePath('/');
         sessionStorage.removeItem('postLoginRedirect');
-        window.location.replace(redirect);
+        window.location.replace(withAppBasePath(redirect));
       }
     };
     handleExchange();

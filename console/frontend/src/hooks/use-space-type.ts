@@ -13,6 +13,7 @@ import {
   visitSpace,
 } from '@/services/space';
 import { useCallback, useMemo } from 'react';
+import { getAppPathname, withAppBasePath } from '@/utils/base-path';
 
 // 从spaceStore中引入类型
 type SpaceStoreState = Pick<
@@ -109,7 +110,7 @@ export const useSpaceType = (navigate?: any) => {
       });
 
       if (params?.isJump) {
-        window.location.href = '/space/agent';
+        window.location.href = withAppBasePath('/space/agent');
       }
     },
     [setSpaceStore]
@@ -248,8 +249,8 @@ export const useSpaceType = (navigate?: any) => {
             throw new Error('最近访问空间不存在');
           }
 
-          if (!window.location.pathname.includes('/home')) {
-            window.location.href = '/home';
+          if (!getAppPathname().includes('/home')) {
+            window.location.href = withAppBasePath('/home');
             return;
           }
 

@@ -1,4 +1,5 @@
 import Loading from '@/components/loading';
+import { getAppBasePath } from '@/utils/base-path';
 import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import Layout from '@/layouts/index';
@@ -276,6 +277,8 @@ const routes = [
 ];
 
 const router: ReturnType<typeof createBrowserRouter> =
-  createBrowserRouter(routes);
+  createBrowserRouter(routes, {
+    basename: getAppBasePath(),
+  });
 
 export default router;

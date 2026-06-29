@@ -12,6 +12,7 @@ import toolModalAdd from '@/assets/imgs/workflow/tool-modal-add.png';
 import xingchenIcon from '@/assets/imgs/knowledge/xingchen-icon.svg';
 import xingPuIcon from '@/assets/imgs/knowledge/xingpu-icon.svg';
 import baseVersionIcon from '@/assets/imgs/knowledge/base-version-icon.svg';
+import { buildAppUrl } from '@/utils/base-path';
 
 const KnowledgeToolbar = ({
   orderBy,
@@ -66,10 +67,7 @@ const KnowledgeToolbar = ({
           className="flex items-center gap-2"
           onClick={(e): void => {
             e.stopPropagation();
-            window.open(
-              `${window.location.origin}/resource/knowledge`,
-              '_blank'
-            );
+            window.open(buildAppUrl('/resource/knowledge'), '_blank');
           }}
           style={{
             height: 40,

@@ -5,6 +5,9 @@ FROM --platform=$BUILDPLATFORM node:18-alpine AS builder
 
 WORKDIR /app
 
+ARG CONSOLE_BASE_PATH=/
+ENV CONSOLE_BASE_PATH=$CONSOLE_BASE_PATH
+
 RUN npm config set registry https://registry.npmjs.org/
 
 # 只拷贝依赖清单，利于缓存命中

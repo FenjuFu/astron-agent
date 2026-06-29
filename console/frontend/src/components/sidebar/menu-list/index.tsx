@@ -26,6 +26,7 @@ import enterpriseSpaceJoin from '@/assets/imgs/space/enterpriseSpaceJoin.png';
 import arrowRight from '@/assets/imgs/space/arrowRight.png';
 import { deleteChatList } from '@/services/chat';
 import { PostChatItem } from '@/types/chat';
+import { getAppPathname } from '@/utils/base-path';
 
 // Constants
 const getAllMessage = async (params: any) => {
@@ -373,10 +374,7 @@ const useMenuListHelpers = (
 
   // Effects handlers
   const initializeActiveMenu = (location: any) => {
-    const path = window.location.pathname.replace(
-      '/application-development',
-      ''
-    );
+    const path = getAppPathname().replace('/application-development', '');
     menuList.map(item => {
       item.tabs.map(tab => {
         if (path.includes(tab.activeTab)) {

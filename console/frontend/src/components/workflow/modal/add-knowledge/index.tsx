@@ -18,6 +18,7 @@ import {
   useAddKnowledgeProps,
 } from '@/components/workflow/types';
 import { Icons } from '@/components/workflow/icons';
+import { buildAppUrl } from '@/utils/base-path';
 
 const useAddKnowledge = (): useAddKnowledgeProps => {
   const { t } = useTranslation();
@@ -402,10 +403,7 @@ const AddKnowledge = (): React.ReactElement => {
                     type="primary"
                     onClick={e => {
                       e.stopPropagation();
-                      window.open(
-                        `${window.location.origin}/resource/knowledge`,
-                        '_blank'
-                      );
+                      window.open(buildAppUrl('/resource/knowledge'), '_blank');
                     }}
                   >
                     {t(

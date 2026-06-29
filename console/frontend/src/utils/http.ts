@@ -24,6 +24,7 @@ import type {
 } from 'axios';
 import type { ResponseResult } from '@/types/global';
 import { handleLoginRedirect } from './auth';
+import { getAppPathname, withAppBasePath } from './base-path';
 
 /**
  * 获取后端需要的语言代码
@@ -199,7 +200,7 @@ export const initBusinessError = (
   if ([80000, 90000].includes(result.code)) {
     switchPersonal();
     // 登陆异常
-    if (!specialRouter.includes(window.location.pathname)) {
+    if (!specialRouter.includes(getAppPathname())) {
       jumpToLogin();
     }
     if (
@@ -218,28 +219,29 @@ export const initBusinessError = (
       if (result.code === 80004) {
         switchPersonal();
       }
-      window.location.href = '/space/agent';
+      window.location.href = withAppBasePath('/space/agent');
       return;
     });
   }
   // 星火注销
-  if (result.code === 99900 && window.location.pathname !== '/spark') {
-    window.location.href = '/spark';
+  const pathname = getAppPathname();
+  if (result.code === 99900 && pathname !== '/spark') {
+    window.location.href = withAppBasePath('/spark');
   }
   // 永久封禁
-  if (result.code === 10004 && window.location.pathname !== '/ban') {
-    window.location.href = '/ban';
+  if (result.code === 10004 && pathname !== '/ban') {
+    window.location.href = withAppBasePath('/ban');
   }
 
   // 24小时封禁
   if (result.code === 10003) {
     message.error(result?.desc || '获取信息失败', 5, () => {
-      window.location.href = '/spark';
+      window.location.href = withAppBasePath('/spark');
     });
   }
 
   // ban页面中的特殊处理，业务上需要code码，直接返回result
-  if (window.location.pathname === '/ban') {
+  if (pathname === '/ban') {
     return result;
   }
   //这里要reject出去，不然直接返回result跟正常情况下返回的result.data不一致
@@ -444,7 +446,7 @@ const getBaseURL = (): string => {
   console.log('VITE_DEV_URL', VITE_DEV_URL);
 
   if (mode === 'production') {
-    return '/console-api';
+    return withAppBasePath('/console-api');
   }
 
   const runtimeBaseUrl = getRuntimeBaseURL();

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import search from '@/assets/imgs/workflow/search-icon.svg';
 import publishIcon from '@/assets/imgs/workflow/publish-icon.png';
 import toolModalAdd from '@/assets/imgs/workflow/tool-modal-add.png';
+import { buildAppUrl } from '@/utils/base-path';
 
 const SkillToolbar = ({
   searchValue,
@@ -37,7 +38,7 @@ const SkillToolbar = ({
           className="flex items-center gap-2"
           onClick={e => {
             e.stopPropagation();
-            window.open(`${window.location.origin}/resource/skill`, '_blank');
+            window.open(buildAppUrl('/resource/skill'), '_blank');
           }}
           style={{
             height: 40,

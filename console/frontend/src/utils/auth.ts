@@ -1,13 +1,14 @@
 import { performLogout, casdoorSdk } from '@/config/casdoor';
+import { buildAppUrl, getAppPathname } from '@/utils/base-path';
 
 export const handleLoginRedirect = (): void => {
   sessionStorage.setItem(
     'postLoginRedirect',
-    window.location.pathname + window.location.search
+    getAppPathname() + window.location.search
   );
   casdoorSdk.signin_redirect();
 };
 
 export const handleLogout = (): void => {
-  performLogout(window.location.origin);
+  performLogout(buildAppUrl('/home'));
 };

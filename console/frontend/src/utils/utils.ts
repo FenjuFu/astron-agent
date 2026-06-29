@@ -15,6 +15,7 @@ import {
   JsonArray,
 } from '@/types/resource';
 import axios from 'axios';
+import { getAppPathname } from '@/utils/base-path';
 
 export function downloadExcel(
   fileIds: (string | number)[],
@@ -56,12 +57,12 @@ export const isJSON = (str: string): boolean | void => {
 };
 
 export const getRouteId = (): string => {
-  const arr = window.location.pathname.split('/');
+  const arr = getAppPathname().split('/');
   return arr[arr.length - 2] || '';
 };
 
 export const getActiveKey = (): string => {
-  let key = window.location.pathname.split('/').pop();
+  let key = getAppPathname().split('/').pop();
   if (key === 'file' || key === 'segmentation') {
     key = 'document';
   }

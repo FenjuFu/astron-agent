@@ -8,6 +8,7 @@ import {
   visitEnterprise as visitEnterpriseApi,
 } from '@/services/enterprise';
 import { getCorporateCount } from '@/services/space';
+import { withAppBasePath } from '@/utils/base-path';
 
 export const useEnterprise = (navigate?: any) => {
   const {
@@ -27,7 +28,7 @@ export const useEnterprise = (navigate?: any) => {
     try {
       const res: any = await checkNeedCreateTeam();
       if (res > 0) {
-        window.location.href = `/team/create/${res}`;
+        window.location.href = withAppBasePath(`/team/create/${res}`);
       }
     } catch (err) {
       console.log(err);
@@ -95,7 +96,7 @@ export const useEnterprise = (navigate?: any) => {
     setEnterpriseId('');
     setSpaceType('personal');
     sessionStorage.removeItem('space-storage');
-    window.location.href = '/home';
+    window.location.href = withAppBasePath('/home');
   };
 
   const visitEnterprise = useCallback(async (enterpriseId: string) => {

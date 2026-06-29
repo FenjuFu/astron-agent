@@ -5,6 +5,7 @@ import { useRef } from 'react';
 import type { Option } from '@/types/chat';
 import { useNavigate } from 'react-router-dom';
 import { baseURL } from '@/utils/http';
+import { buildAppUrl } from '@/utils/base-path';
 
 // SSE 数据类型定义
 interface SSEData {
@@ -291,7 +292,7 @@ const useChat = () => {
   };
 
   const handleFlowToChat = (item: any) => {
-    let url = `${window.location.origin}/chat/${item?.botId}`;
+    let url = buildAppUrl(`/chat/${item?.botId}`);
     if (item?.version) {
       url += `?version=${item?.version}`;
     }

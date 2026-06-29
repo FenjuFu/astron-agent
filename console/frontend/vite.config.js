@@ -3,11 +3,21 @@ import react from '@vitejs/plugin-react';
 import commonjs from 'vite-plugin-commonjs';
 import { CodeInspectorPlugin } from 'code-inspector-plugin';
 
+const normalizeBasePath = value => {
+  if (!value || value === '/') return '/';
+  const withLeadingSlash = value.startsWith('/') ? value : `/${value}`;
+  const trimmed = withLeadingSlash.replace(/\/+$/, '');
+  return `${trimmed}/`;
+};
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const isDev = mode === 'development';
+  const appBasePath =
+    process.env.CONSOLE_BASE_PATH || (mode === 'demo' ? '/demo/' : '/');
 
   return {
+    base: normalizeBasePath(appBasePath),
     envPrefix: ['CONSOLE_', 'VITE_'],
     build: {
       rollupOptions: {

@@ -17,6 +17,7 @@ import iflytekCloudIcon from '@/assets/imgs/workflow/iflytekCloud-icon.png';
 // import iflytekIcon from '@/assets/imgs/workflow/iflytek-icon.png';
 import agentHubIcon from '@/assets/imgs/workflow/agent-hub-icon.svg';
 import { useTranslation } from 'react-i18next';
+import { getAppPathname } from '@/utils/base-path';
 
 import styles from './index.module.scss';
 
@@ -242,7 +243,7 @@ const DetailOverview = () => {
 
   useEffect(() => {
     // 从http://localhost:5173/management/release/detail/4011159 路径中获取botId
-    const paras = window.location.pathname.split('/');
+    const paras = getAppPathname().split('/');
     const botId = paras[paras.length - 1];
     getVersionListData(botId);
   }, []);

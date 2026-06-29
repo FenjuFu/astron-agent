@@ -1,5 +1,6 @@
 // Casdoor 配置与 SDK 初始化
 import Sdk from 'casdoor-js-sdk';
+import { buildAppUrl, withAppBasePath } from '@/utils/base-path';
 
 const getRuntimeCasdoorUrl = (): string => {
   try {
@@ -68,7 +69,7 @@ export const casdoorSdk = new Sdk({
   clientId: getRuntimeCasdoorClientId(),
   appName: getRuntimeCasdoorAppName(),
   organizationName: getRuntimeCasdoorOrgName(),
-  redirectPath: '/callback',
+  redirectPath: withAppBasePath('/callback'),
   signinPath: '/api/signin',
 });
 
@@ -103,7 +104,7 @@ export const isGetTokenSuccessful = (res: unknown): boolean => {
 export const getLogoutUrl = (postLogoutRedirect?: string): string => {
   const server = getRuntimeCasdoorUrl() || '';
   const clientId = getRuntimeCasdoorClientId();
-  const redirect = postLogoutRedirect || window.location.origin;
+  const redirect = postLogoutRedirect || buildAppUrl('/home');
   const url = new URL(`${server.replace(/\/$/, '')}/logout`);
   if (clientId) url.searchParams.set('clientId', clientId);
   url.searchParams.set('post_logout_redirect_uri', redirect);
@@ -120,7 +121,7 @@ export const performLogout = (postLogoutRedirect?: string): void => {
     //
   }
   // 返回首页
-  window.location.href = '/home';
+  window.location.href = postLogoutRedirect || buildAppUrl('/home');
 };
 
 export interface ParsedUserInfo {
