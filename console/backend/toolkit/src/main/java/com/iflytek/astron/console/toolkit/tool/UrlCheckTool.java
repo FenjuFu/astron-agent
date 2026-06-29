@@ -98,10 +98,6 @@ public class UrlCheckTool {
         try {
             URL u = toSafeHttpUrl(url);
             ensurePublicAddresses(u.getHost());
-            List<String> domainWhiteList = readCsvConfig(DOMAIN_WHITE_CATEGORY);
-            if (!isHostInDomainAllowList(u.getHost(), domainWhiteList)) {
-                throw new BusinessException(ResponseEnum.TOOLBOX_URL_ILLEGAL);
-            }
             URLConnection urlConnection = u.openConnection();
             if (!(urlConnection instanceof HttpURLConnection httpURLConnection)) {
                 throw new BusinessException(ResponseEnum.TOOLBOX_URL_HTTP_HTTPS_ONLY);
@@ -482,6 +478,10 @@ public class UrlCheckTool {
         String normalizedHost = StringUtils.lowerCase(StringUtils.trim(host), Locale.ROOT);
         for (String allowed : domainWhiteList) {
             String normalizedAllowed = StringUtils.lowerCase(StringUtils.trimToEmpty(allowed), Locale.ROOT);
+            // Remove leading dot if present (e.g., ".example.com" -> "example.com")
+            if (normalizedAllowed.startsWith(".")) {
+                normalizedAllowed = normalizedAllowed.substring(1);
+            }
             if (normalizedAllowed.isEmpty()) {
                 continue;
             }
