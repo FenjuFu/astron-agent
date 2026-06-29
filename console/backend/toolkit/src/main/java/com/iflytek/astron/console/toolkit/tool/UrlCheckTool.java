@@ -471,6 +471,27 @@ public class UrlCheckTool {
 
     private record RedirectLookupResult(int statusCode, String location) {}
 
+    private boolean isHostInDomainAllowList(String host, List<String> domainWhiteList) {
+        if (StringUtils.isBlank(host) || domainWhiteList == null || domainWhiteList.isEmpty()) {
+            return false;
+        }
+        String normalizedHost = StringUtils.lowerCase(StringUtils.trim(host), Locale.ROOT);
+        for (String allowed : domainWhiteList) {
+            String normalizedAllowed = StringUtils.lowerCase(StringUtils.trimToEmpty(allowed), Locale.ROOT);
+            // Remove leading dot if present (e.g., ".example.com" -> "example.com")
+            if (normalizedAllowed.startsWith(".")) {
+                normalizedAllowed = normalizedAllowed.substring(1);
+            }
+            if (normalizedAllowed.isEmpty()) {
+                continue;
+            }
+            if (normalizedHost.equals(normalizedAllowed) || normalizedHost.endsWith("." + normalizedAllowed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private URL toSafeHttpUrl(String url) throws IOException {
         try {
             URI uri = new URI(url);
