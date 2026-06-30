@@ -1677,7 +1677,7 @@ spec:
                   add_header X-Content-Type-Options "nosniff" always;
 
                   location = / {
-                      return 302 /demo/;
+                      return 302 /home;
                   }
 
                   location = /demo/runtime-config.js {
