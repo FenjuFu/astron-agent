@@ -1,0 +1,101 @@
+name: Sync Upstream Repository
+
+on:
+  schedule:
+    - cron: '15 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: 'Upstream repository URL'
+        required: false
+        default: 'https://github.com/iflytek/astron-agent.git'
+        type: string
+      upstream_branch:
+        description: 'Upstream branch to mirror'
+        required: false
+        default: 'main'
+        type: string
+      target_branch:
+        description: 'Branch in this fork that mirrors upstream'
+        required: false
+        default: 'upstream-mirror/main'
+        type: string
+      dry_run:
+        description: 'Preview sync without pushing'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Mirror upstream/main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream branch
+        id: fetch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          UPSTREAM_REPO="${{ github.event.inputs.upstream_repo || 'https://github.com/iflytek/astron-agent.git' }}"
+          UPSTREAM_BRANCH="${{ github.event.inputs.upstream_branch || 'main' }}"
+          TARGET_BRANCH="${{ github.event.inputs.target_branch || 'upstream-mirror/main' }}"
+
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream "$UPSTREAM_REPO"
+          else
+            git remote add upstream "$UPSTREAM_REPO"
+          fi
+
+          git fetch --prune upstream "$UPSTREAM_BRANCH"
+
+          UPSTREAM_SHA="$(git rev-parse "upstream/$UPSTREAM_BRANCH")"
+
+          {
+            echo "upstream_repo=$UPSTREAM_REPO"
+            echo "upstream_branch=$UPSTREAM_BRANCH"
+            echo "target_branch=$TARGET_BRANCH"
+            echo "upstream_sha=$UPSTREAM_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update mirror branch
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TARGET_BRANCH="${{ steps.fetch.outputs.target_branch }}"
+          UPSTREAM_BRANCH="${{ steps.fetch.outputs.upstream_branch }}"
+
+          git checkout -B "$TARGET_BRANCH" "upstream/$UPSTREAM_BRANCH"
+          git push --force-with-lease origin "$TARGET_BRANCH"
+
+      - name: Write summary
+        shell: bash
+        run: |
+          {
+            echo "## Upstream Sync"
+            echo ""
+            echo "- Upstream repo: \`${{ steps.fetch.outputs.upstream_repo }}\`"
+            echo "- Upstream branch: \`${{ steps.fetch.outputs.upstream_branch }}\`"
+            echo "- Mirror branch: \`${{ steps.fetch.outputs.target_branch }}\`"
+            echo "- Upstream SHA: \`${{ steps.fetch.outputs.upstream_sha }}\`"
+            echo "- Dry run: \`${{ github.event.inputs.dry_run || 'false' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

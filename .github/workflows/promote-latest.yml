@@ -1,0 +1,142 @@
+name: Promote Zeabur Latest
+
+on:
+  push:
+    branches:
+      - 'upstream-mirror/main'
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: 'Mirror branch to promote from'
+        required: false
+        default: 'upstream-mirror/main'
+        type: string
+      target_branch:
+        description: 'Deployment branch consumed by Zeabur latest'
+        required: false
+        default: 'zeabur/latest'
+        type: string
+      patch_branch:
+        description: 'Branch that holds Zeabur-specific deployment patches'
+        required: false
+        default: 'deploy/zeabur-template'
+        type: string
+      dry_run:
+        description: 'Preview promotion without pushing'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-zeabur-latest
+  cancel-in-progress: false
+
+env:
+  DEPLOY_PATCH_PATHS: |
+    docker/astronAgent/nginx/nginx.conf
+    docker/astronAgent/zeabur.yaml
+
+jobs:
+  promote:
+    name: Promote mirror to zeabur/latest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve branches
+        id: branches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            SOURCE_BRANCH="${GITHUB_REF_NAME}"
+          else
+            SOURCE_BRANCH="${{ github.event.inputs.source_branch || 'upstream-mirror/main' }}"
+          fi
+
+          TARGET_BRANCH="${{ github.event.inputs.target_branch || 'zeabur/latest' }}"
+          PATCH_BRANCH="${{ github.event.inputs.patch_branch || 'deploy/zeabur-template' }}"
+
+          {
+            echo "source_branch=$SOURCE_BRANCH"
+            echo "target_branch=$TARGET_BRANCH"
+            echo "patch_branch=$PATCH_BRANCH"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch source and patch branches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --prune origin \
+            "${{ steps.branches.outputs.source_branch }}" \
+            "${{ steps.branches.outputs.patch_branch }}"
+
+      - name: Promote branch and re-apply deployment patches
+        id: promote
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE_BRANCH="${{ steps.branches.outputs.source_branch }}"
+          TARGET_BRANCH="${{ steps.branches.outputs.target_branch }}"
+          PATCH_BRANCH="${{ steps.branches.outputs.patch_branch }}"
+
+          git checkout -B "$TARGET_BRANCH" "origin/$SOURCE_BRANCH"
+
+          mapfile -t PATCH_FILES < <(printf '%s\n' "$DEPLOY_PATCH_PATHS" | sed '/^\s*$/d')
+          git checkout "origin/$PATCH_BRANCH" -- "${PATCH_FILES[@]}"
+
+          SOURCE_SHA="$(git rev-parse "origin/$SOURCE_BRANCH")"
+          PATCH_SHA="$(git rev-parse "origin/$PATCH_BRANCH")"
+
+          {
+            echo "source_sha=$SOURCE_SHA"
+            echo "patch_sha=$PATCH_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git add -- "${PATCH_FILES[@]}"
+          git commit -m "chore: promote ${SOURCE_BRANCH} to ${TARGET_BRANCH}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push zeabur/latest
+        if: ${{ github.event.inputs.dry_run != 'true' && steps.promote.outputs.changed == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force-with-lease origin "${{ steps.branches.outputs.target_branch }}"
+
+      - name: Write summary
+        shell: bash
+        run: |
+          {
+            echo "## Zeabur Latest Promotion"
+            echo ""
+            echo "- Source branch: \`${{ steps.branches.outputs.source_branch }}\`"
+            echo "- Target branch: \`${{ steps.branches.outputs.target_branch }}\`"
+            echo "- Patch branch: \`${{ steps.branches.outputs.patch_branch }}\`"
+            echo "- Source SHA: \`${{ steps.promote.outputs.source_sha }}\`"
+            echo "- Patch SHA: \`${{ steps.promote.outputs.patch_sha }}\`"
+            echo "- Applied paths:"
+            echo "  - \`docker/astronAgent/nginx/nginx.conf\`"
+            echo "  - \`docker/astronAgent/zeabur.yaml\`"
+            echo "- Changed branch: \`${{ steps.promote.outputs.changed || 'false' }}\`"
+            echo "- Dry run: \`${{ github.event.inputs.dry_run || 'false' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
