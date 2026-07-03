@@ -101,6 +101,31 @@ class AgentWorkflowRuntimeServiceTest {
     }
 
     @Test
+    void checkWorkflowsAccessible_jsonOverload_allowsOwnRejectsForeignAndToleratesMalformed() {
+        Workflow own = sampleWorkflow();
+        Workflow foreign = sampleWorkflow();
+        foreign.setFlowId("flowForeign");
+        foreign.setUid("someone");
+        foreign.setSpaceId(99L);
+        WorkflowMapper mapper = mock(WorkflowMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of(own, foreign));
+
+        AgentWorkflowRuntimeService service = newService(mapper, mock(WorkflowChatRunClient.class));
+
+        // Accessible flowId named in the raw JSON array.
+        assertThat(service.checkWorkflowsAccessible("me", 7L, "[{\"flowId\":\"flow123\"}]")).isTrue();
+
+        // Foreign flowId named in the raw JSON array must be rejected.
+        assertThat(service.checkWorkflowsAccessible("me", 7L, "[{\"flowId\":\"flowForeign\"}]")).isFalse();
+
+        // Malformed JSON parses to an empty flowId list, which is trivially accessible; this is
+        // safe because the resolver's own tolerant parser also yields an empty list, so nothing
+        // gets assembled or executed.
+        assertThat(service.checkWorkflowsAccessible("me", 7L, "not json")).isTrue();
+        assertThat(service.checkWorkflowsAccessible("me", 7L, (String) null)).isTrue();
+    }
+
+    @Test
     void runWorkflow_sendsNonStreamingRequestAndExtractsContent() throws Exception {
         WorkflowMapper mapper = mock(WorkflowMapper.class);
         when(mapper.selectList(any())).thenReturn(List.of(sampleWorkflow()));

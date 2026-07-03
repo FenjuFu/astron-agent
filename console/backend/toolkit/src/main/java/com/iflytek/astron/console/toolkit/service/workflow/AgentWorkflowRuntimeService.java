@@ -98,6 +98,36 @@ public class AgentWorkflowRuntimeService {
         return true;
     }
 
+    /** Convenience guard for callers holding the raw workflows JSON (e.g. the debug endpoint). */
+    public boolean checkWorkflowsAccessible(String uid, Long spaceId, String workflowsJson) {
+        return checkWorkflowsAccessible(uid, spaceId, parseFlowIds(workflowsJson));
+    }
+
+    /** Extract the {@code flowId} list from a workflows JSON array; tolerant of malformed input. */
+    public List<String> parseFlowIds(String workflowsJson) {
+        if (StringUtils.isBlank(workflowsJson)) {
+            return List.of();
+        }
+        List<String> flowIds = new ArrayList<>();
+        try {
+            JSONArray array = JSON.parseArray(workflowsJson.trim());
+            for (int i = 0; i < array.size(); i++) {
+                JSONObject item = array.getJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                String flowId = item.getString("flowId");
+                if (StringUtils.isNotBlank(flowId)) {
+                    flowIds.add(flowId.trim());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Invalid workflows json, ignored: {}", workflowsJson);
+            return List.of();
+        }
+        return flowIds.stream().distinct().toList();
+    }
+
     /** Execute the workflow with the model-provided arguments; returns a string for the model. */
     public String runWorkflow(AgentWorkflowDefinition definition, String uid, JSONObject modelArgs) {
         if (definition == null) {

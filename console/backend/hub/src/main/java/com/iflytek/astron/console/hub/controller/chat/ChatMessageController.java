@@ -12,6 +12,7 @@ import com.iflytek.astron.console.commons.service.bot.ChatBotDataService;
 import com.iflytek.astron.console.commons.service.data.ChatDataService;
 import com.iflytek.astron.console.commons.service.data.ChatListDataService;
 import com.iflytek.astron.console.commons.util.SseEmitterUtil;
+import com.iflytek.astron.console.commons.util.space.SpaceInfoUtil;
 import com.iflytek.astron.console.hub.dto.chat.BotDebugRequest;
 import com.iflytek.astron.console.commons.dto.bot.ChatBotReqDto;
 import com.iflytek.astron.console.commons.dto.bot.DebugChatBotReqDto;
@@ -20,6 +21,7 @@ import com.iflytek.astron.console.commons.entity.chat.ChatList;
 import com.iflytek.astron.console.commons.entity.chat.ChatReqRecords;
 import com.iflytek.astron.console.commons.entity.chat.ChatTreeIndex;
 import com.iflytek.astron.console.hub.service.chat.BotChatService;
+import com.iflytek.astron.console.toolkit.service.workflow.AgentWorkflowRuntimeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.PostConstruct;
@@ -58,6 +60,9 @@ public class ChatMessageController {
 
     @Autowired
     private RedissonClient redissonClient;
+
+    @Autowired
+    private AgentWorkflowRuntimeService agentWorkflowRuntimeService;
 
     public static final String STOP_GENERATE_SUBSCRIBE_PUBLISH_CHANNEL = "stop_generate_sub_pub";
 
@@ -406,6 +411,13 @@ public class ChatMessageController {
         debugChatReqDto.setModelId(debugRequest.getModelId());
         debugChatReqDto.setMaasDatasetList(maasDatasetList);
         debugChatReqDto.setPersonalityConfig(debugRequest.getPersonalityConfig());
+
+        // Debug requests carry workflows straight from the client; enforce the same ownership
+        // gate as save, otherwise any user could run another owner's workflow via crafted input.
+        if (!agentWorkflowRuntimeService.checkWorkflowsAccessible(uid, SpaceInfoUtil.getSpaceId(), debugRequest.getWorkflows())) {
+            SseEmitterUtil.completeWithError(sseEmitter, "Workflow not accessible");
+            return sseEmitter;
+        }
 
         try {
             sendStartSignal(sseEmitter, sseId,
