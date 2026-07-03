@@ -17,6 +17,12 @@ import {
   Row,
   Col,
   Tabs,
+  Switch,
+  InputNumber,
+  List,
+  Popconfirm,
+  Empty,
+  Tag,
 } from 'antd';
 
 import ConfigHeader from '@/components/config-page-component/config-header/ConfigHeader';
@@ -53,9 +59,13 @@ import { useTranslation } from 'react-i18next';
 import { getLanguageCode } from '@/utils/http';
 import {
   EditOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
   LeftOutlined,
   MessageOutlined,
   PlusSquareOutlined,
+  ReloadOutlined,
+  SaveOutlined,
   SearchOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
@@ -97,10 +107,27 @@ import {
   getAgentDebugSessions,
   saveAgentDebugMessages,
 } from '@/services/agent-debug';
+import {
+  AgentMemoryConfig,
+  AgentMemoryItem,
+  clearAgentMemories,
+  deleteAgentMemory,
+  getAgentMemories,
+  getAgentMemoryConfig,
+  saveAgentMemoryConfig,
+} from '@/services/agent-memory';
+import { modelRsaPublicKey } from '@/services/model';
+import { encryptApiKey } from '@/pages/model-management/utils/encrypt-api-key';
 
 const { Option } = Select;
 
-type WorkbenchView = 'chat' | 'search' | 'basic' | 'prompt' | 'capability';
+type WorkbenchView =
+  | 'chat'
+  | 'search'
+  | 'basic'
+  | 'prompt'
+  | 'capability'
+  | 'memory';
 
 const getDebugSessionTitleFromMessages = (
   messages: MessageListType[]
@@ -131,6 +158,45 @@ const filterDebugSessions = (
     getDebugSessionSearchText(session).includes(normalizedKeyword)
   );
 };
+
+const buildDefaultMemoryConfig = (botId: number): AgentMemoryConfig => ({
+  botId,
+  provider: 'MEM0',
+  enabled: false,
+  hasApiKey: false,
+  autoSearch: true,
+  searchTopK: 5,
+  minScore: 0,
+});
+
+const MEMORY_API_KEY_MASK = '****************';
+
+const normalizeBotTypeValue = (value: unknown): number | undefined => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return undefined;
+  }
+  return numericValue;
+};
+
+const resolveBotTypeValue = (
+  value: unknown,
+  options: Array<{ value: unknown }> = []
+): number | undefined => {
+  const normalizedValue = normalizeBotTypeValue(value);
+  if (
+    normalizedValue !== undefined &&
+    options.some(item => Number(item.value) === normalizedValue)
+  ) {
+    return normalizedValue;
+  }
+  return normalizeBotTypeValue(options[0]?.value);
+};
+
+const PUBLISHED_BOT_STATUSES = [1, 2, 4];
+
+const isPublishedBotStatus = (botStatus?: number): boolean =>
+  botStatus !== undefined && PUBLISHED_BOT_STATUSES.includes(botStatus);
 
 const baseModelConfig: BaseModelConfig = {
   visible: false,
@@ -195,6 +261,35 @@ const BaseConfig: React.FC<ChatProps> = ({
   const [fabuFlag, setFabuFlag] = useState<boolean>(false);
   const [openWxmol, setOpenWxmol] = useState<boolean>(false);
   const { t } = useTranslation();
+  const memoryProviderOptions = useMemo(
+    () => [
+      {
+        key: 'MEM0',
+        name: 'Mem0',
+        title: t('configBase.memory.mem0Title'),
+        description: t('configBase.memory.mem0Description'),
+        status: t('configBase.memory.connected'),
+        disabled: false,
+      },
+      {
+        key: 'ZEP',
+        name: 'Zep',
+        title: t('configBase.memory.zepTitle'),
+        description: t('configBase.memory.zepDescription'),
+        status: t('configBase.memory.pendingConnection'),
+        disabled: true,
+      },
+      {
+        key: 'LANGMEM',
+        name: 'LangMem',
+        title: t('configBase.memory.langMemTitle'),
+        description: t('configBase.memory.langMemDescription'),
+        status: t('configBase.memory.pendingConnection'),
+        disabled: true,
+      },
+    ],
+    [t]
+  );
   const [askValue, setAskValue] = useState('');
   const [sentence, setSentence] = useState(0); //是否是一句话创建
   const [globalLoading, setGlobalLoading] = useState(false); // 全局loading状态
@@ -285,6 +380,15 @@ const BaseConfig: React.FC<ChatProps> = ({
   const [debugSessionKey, setDebugSessionKey] = useState(0);
   const [debugHistoryLoading, setDebugHistoryLoading] = useState(false);
   const [debugHistorySearchQuery, setDebugHistorySearchQuery] = useState('');
+  const [memoryConfig, setMemoryConfig] = useState<AgentMemoryConfig | null>(
+    null
+  );
+  const [memoryApiKey, setMemoryApiKey] = useState('');
+  const [memoryApiKeyEditing, setMemoryApiKeyEditing] = useState(false);
+  const [memoryItems, setMemoryItems] = useState<AgentMemoryItem[]>([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memorySaving, setMemorySaving] = useState(false);
+  const [memoryListLoading, setMemoryListLoading] = useState(false);
   const activeDebugSessionIdRef = useRef('');
   const debugSessionScopeRef = useRef(0);
   const debugMessageRevisionRef = useRef(0);
@@ -292,6 +396,29 @@ const BaseConfig: React.FC<ChatProps> = ({
     scope: number;
     promise: Promise<AgentDebugSession | null>;
   } | null>(null);
+  const getEffectiveBotType = useCallback(
+    (value: unknown) => resolveBotTypeValue(value, bottypeList),
+    [bottypeList]
+  );
+  const hasRequiredBaseInfo = useCallback(
+    (info: any = baseinfo) =>
+      Boolean(
+        info?.botName && getEffectiveBotType(info?.botType) && info?.botDesc
+      ),
+    [baseinfo, getEffectiveBotType]
+  );
+  const botTypeRules = useMemo(
+    () => [
+      { required: true, message: '' },
+      {
+        validator: (_: unknown, value: unknown) =>
+          getEffectiveBotType(value)
+            ? Promise.resolve()
+            : Promise.reject(new Error('')),
+      },
+    ],
+    [getEffectiveBotType]
+  );
 
   // 人设相关状态
   const [personalityData, setPersonalityData] = useState({
@@ -472,7 +599,7 @@ const BaseConfig: React.FC<ChatProps> = ({
         navigate('/space/agent');
       } else {
         setIsChanged(false);
-        if (detailInfo.botStatus == 2) {
+        if (isPublishedBotStatus(detailInfo.botStatus)) {
           obj.botName = obj.name;
           return setConfigPageData(obj);
         }
@@ -497,9 +624,9 @@ const BaseConfig: React.FC<ChatProps> = ({
     const name = useFormValues
       ? form.getFieldsValue().botName
       : baseinfo.botName;
-    const botType = useFormValues
-      ? form.getFieldsValue().botType
-      : baseinfo.botType;
+    const botType = getEffectiveBotType(
+      useFormValues ? form.getFieldsValue().botType : baseinfo.botType
+    );
     const botDesc = useFormValues
       ? form.getFieldsValue().botDesc
       : baseinfo.botDesc;
@@ -583,11 +710,7 @@ const BaseConfig: React.FC<ChatProps> = ({
     if (!coverUrl) {
       return message.warning(t('configBase.defaultAvatar'));
     }
-    if (
-      baseinfo?.botName === '' ||
-      baseinfo?.botType === '' ||
-      baseinfo?.botDesc === ''
-    ) {
+    if (!hasRequiredBaseInfo()) {
       return message.warning(t('configBase.requiredInfoNotFilled'));
     }
     if (!validateMcpServerUrls()) return;
@@ -617,7 +740,7 @@ const BaseConfig: React.FC<ChatProps> = ({
     if (!coverUrl) {
       return message.warning(t('configBase.defaultAvatar'));
     }
-    if (!baseinfo?.botName || !baseinfo?.botType || !baseinfo?.botDesc) {
+    if (!hasRequiredBaseInfo()) {
       return message.warning(t('configBase.requiredInfoNotFilled'));
     }
     if (!validateMcpServerUrls()) return;
@@ -783,6 +906,11 @@ const BaseConfig: React.FC<ChatProps> = ({
       });
       const filteredBottypeList = arr.filter(item => item.value !== 25);
       setBottypeList(filteredBottypeList);
+      const withValidBotType = (data: any) => {
+        if (!data) return data;
+        const botType = resolveBotTypeValue(data.botType, filteredBottypeList);
+        return botType ? { ...data, botType } : data;
+      };
       const save = searchParams.get('save');
       const botId = searchParams.get('botId');
 
@@ -790,9 +918,10 @@ const BaseConfig: React.FC<ChatProps> = ({
         sessionStorage.removeItem('botTemplateInfoValue');
 
         getBotInfo({ botId: botId }).then((res: any) => {
+          const normalizedRes = withValidBotType(res);
           setBackgroundImgApp(res.appBackground);
           setBackgroundImg(res.pcBackground);
-          setBotInfo(res);
+          setBotInfo(normalizedRes);
           setBotCreateActiveV({
             cn: save == 'true' ? configPageData?.vcnCn : res.vcnCn,
           });
@@ -819,7 +948,10 @@ const BaseConfig: React.FC<ChatProps> = ({
           } else {
             obj.codeinterpreter = false;
           }
-          const currentConfigData = save == 'true' ? configPageData : res;
+          const currentConfigData =
+            save == 'true'
+              ? withValidBotType(configPageData || res)
+              : normalizedRes;
           setMcpServerUrls(
             normalizeMcpServerUrls(currentConfigData?.mcpServerUrls)
           );
@@ -846,9 +978,13 @@ const BaseConfig: React.FC<ChatProps> = ({
           );
           setPrologue(save == 'true' ? configPageData?.prologue : res.prologue);
           setChoosedAlltool(obj);
-          setBaseinfo(save == 'true' ? configPageData : res);
-          form.setFieldsValue(save == 'true' ? configPageData : res);
-          setDetailInfo(save == 'true' ? { ...res, ...configPageData } : res);
+          setBaseinfo(currentConfigData);
+          form.setFieldsValue(currentConfigData);
+          setDetailInfo(
+            save == 'true'
+              ? { ...normalizedRes, ...currentConfigData }
+              : currentConfigData
+          );
           setCoverUrl(save == 'true' ? configPageData?.avatar : res.avatar);
 
           // 回显人设数据
@@ -929,6 +1065,10 @@ const BaseConfig: React.FC<ChatProps> = ({
             setSelectSource(arr);
           });
         });
+      } else {
+        const initialBaseInfo = withValidBotType(obj);
+        setBaseinfo(initialBaseInfo);
+        form.setFieldsValue(initialBaseInfo);
       }
     });
     const quickCreate = searchParams.get('quickCreate');
@@ -1120,6 +1260,131 @@ const BaseConfig: React.FC<ChatProps> = ({
   useEffect(() => {
     loadDebugSessions();
   }, [loadDebugSessions]);
+
+  const loadMemoryConfig = useCallback(async () => {
+    if (!currentBotId) {
+      setMemoryConfig(null);
+      setMemoryApiKey('');
+      setMemoryApiKeyEditing(false);
+      return;
+    }
+    setMemoryLoading(true);
+    try {
+      const config = await getAgentMemoryConfig(currentBotId);
+      setMemoryConfig({
+        ...buildDefaultMemoryConfig(currentBotId),
+        ...(config || {}),
+      });
+      setMemoryApiKey('');
+      setMemoryApiKeyEditing(false);
+    } catch (err) {
+      setMemoryConfig(buildDefaultMemoryConfig(currentBotId));
+      setMemoryApiKey('');
+      setMemoryApiKeyEditing(false);
+    } finally {
+      setMemoryLoading(false);
+    }
+  }, [currentBotId]);
+
+  const loadMemoryItems = useCallback(async () => {
+    if (!currentBotId) {
+      setMemoryItems([]);
+      return;
+    }
+    setMemoryListLoading(true);
+    try {
+      const items = await getAgentMemories(currentBotId);
+      setMemoryItems(items || []);
+    } catch (err) {
+      setMemoryItems([]);
+    } finally {
+      setMemoryListLoading(false);
+    }
+  }, [currentBotId]);
+
+  useEffect(() => {
+    if (activeWorkbenchView === 'memory') {
+      loadMemoryConfig();
+      loadMemoryItems();
+    }
+  }, [activeWorkbenchView, loadMemoryConfig, loadMemoryItems]);
+
+  const updateMemoryConfig = useCallback(
+    (patch: Partial<AgentMemoryConfig>) => {
+      if (!currentBotId) return;
+      setMemoryConfig(prev => ({
+        ...buildDefaultMemoryConfig(currentBotId),
+        ...(prev || {}),
+        ...patch,
+      }));
+    },
+    [currentBotId]
+  );
+
+  const handleSaveMemoryConfig = useCallback(async () => {
+    if (!currentBotId) return;
+    const config = memoryConfig || buildDefaultMemoryConfig(currentBotId);
+    const apiKey = memoryApiKey.trim();
+    if (config.enabled && !config.hasApiKey && !apiKey) {
+      message.warning(t('configBase.memory.apiKeyRequired'));
+      return;
+    }
+
+    setMemorySaving(true);
+    try {
+      let apiKeyCiphertext: string | undefined;
+      if (apiKey) {
+        const publicKey = await modelRsaPublicKey();
+        apiKeyCiphertext = encryptApiKey(publicKey, apiKey);
+      }
+      const saved = await saveAgentMemoryConfig({
+        botId: currentBotId,
+        provider: config.provider,
+        enabled: config.enabled,
+        apiKeyCiphertext,
+        autoSearch: config.autoSearch,
+        searchTopK: config.searchTopK,
+        minScore: config.minScore,
+      });
+      setMemoryConfig({
+        ...buildDefaultMemoryConfig(currentBotId),
+        ...(saved || {}),
+      });
+      setMemoryApiKey('');
+      setMemoryApiKeyEditing(false);
+      message.success(t('configBase.saveSuccess'));
+      loadMemoryItems();
+    } catch (err: any) {
+      message.error(err?.msg || t('configBase.memory.saveConfigFailed'));
+    } finally {
+      setMemorySaving(false);
+    }
+  }, [currentBotId, loadMemoryItems, memoryApiKey, memoryConfig, t]);
+
+  const handleDeleteMemory = useCallback(
+    async (memoryId: string) => {
+      if (!currentBotId) return;
+      try {
+        await deleteAgentMemory(currentBotId, memoryId);
+        message.success(t('configBase.memory.deleted'));
+        loadMemoryItems();
+      } catch (err: any) {
+        message.error(err?.msg || t('configBase.memory.deleteFailed'));
+      }
+    },
+    [currentBotId, loadMemoryItems, t]
+  );
+
+  const handleClearMemories = useCallback(async () => {
+    if (!currentBotId) return;
+    try {
+      await clearAgentMemories(currentBotId);
+      message.success(t('configBase.memory.cleared'));
+      loadMemoryItems();
+    } catch (err: any) {
+      message.error(err?.msg || t('configBase.memory.clearFailed'));
+    }
+  }, [currentBotId, loadMemoryItems, t]);
 
   const filteredDebugSessions = useMemo(
     () => filterDebugSessions(debugSessions, debugHistorySearchQuery),
@@ -1480,7 +1745,7 @@ const BaseConfig: React.FC<ChatProps> = ({
       message.warning(t('configBase.defaultAvatar'));
       return;
     }
-    if (!baseinfo?.botName || !baseinfo?.botType || !baseinfo?.botDesc) {
+    if (!hasRequiredBaseInfo()) {
       message.warning(t('configBase.requiredInfoNotFilled'));
       return;
     }
@@ -1549,6 +1814,11 @@ const BaseConfig: React.FC<ChatProps> = ({
       label: t('configBase.CapabilityDevelopment.capability'),
       icon: <ThunderboltOutlined />,
     },
+    {
+      key: 'memory',
+      label: '记忆',
+      icon: <DatabaseOutlined />,
+    },
   ];
 
   const workbenchTitleMap: Record<WorkbenchView, string> = {
@@ -1557,6 +1827,7 @@ const BaseConfig: React.FC<ChatProps> = ({
     basic: t('configBase.agentBaseInfo') || '基础信息',
     prompt: personalizationTitle,
     capability: t('configBase.CapabilityDevelopment.capability'),
+    memory: '记忆',
   };
 
   const renderWorkbenchActions = () => (
@@ -1651,6 +1922,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                   }
                 }}
                 baseinfo={baseinfo}
+                botId={currentBotId}
                 inputExample={inputExample}
                 coverUrl={coverUrl}
                 selectSource={selectSource}
@@ -1713,6 +1985,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                 }}
                 newPrompt={item.prompt}
                 baseinfo={baseinfo}
+                botId={currentBotId}
                 inputExample={inputExample}
                 coverUrl={coverUrl}
                 selectSource={selectSource}
@@ -1748,6 +2021,7 @@ const BaseConfig: React.FC<ChatProps> = ({
         initialMessages={debugInitialMessages}
         onMessagesChange={handleDebugMessagesChange}
         baseinfo={baseinfo}
+        botId={currentBotId}
         inputExample={inputExample}
         coverUrl={coverUrl}
         selectSource={selectSource}
@@ -1901,7 +2175,7 @@ const BaseConfig: React.FC<ChatProps> = ({
               </Form.Item>
               <Form.Item
                 name="botType"
-                rules={[{ required: true, message: '' }]}
+                rules={botTypeRules}
                 colon={false}
                 label={t('configBase.agentCategory')}
               >
@@ -1965,6 +2239,285 @@ const BaseConfig: React.FC<ChatProps> = ({
     </div>
   );
 
+  const renderMemoryWorkspace = () => {
+    if (!currentBotId) {
+      return (
+        <div className={styles.workbenchFormSection}>
+          <div className={styles.workbenchEmptyState}>
+            {t('configBase.memory.createAgentFirst')}
+          </div>
+        </div>
+      );
+    }
+
+    const config = memoryConfig || buildDefaultMemoryConfig(currentBotId);
+    const keyStatus = memoryApiKey.trim()
+      ? t('configBase.memory.pendingSave')
+      : config.hasApiKey
+        ? t('configBase.memory.configured')
+        : t('configBase.memory.notConfigured');
+    const scoreHint =
+      config.minScore >= 0.5
+        ? t('configBase.memory.highScoreHint')
+        : t('configBase.memory.scoreHint');
+
+    return (
+      <div className={styles.workbenchMemoryWorkspace}>
+        <div className={styles.workbenchMemoryLayout}>
+          <aside className={styles.workbenchMemoryProviders}>
+            <div className={styles.workbenchMemoryPanelTitle}>
+              <span>{t('configBase.memory.service')}</span>
+              <small>{t('configBase.memory.futureProviderSlot')}</small>
+            </div>
+            <div className={styles.workbenchProviderList}>
+              {memoryProviderOptions.map(provider => {
+                const active = provider.key === config.provider;
+                return (
+                  <button
+                    key={provider.key}
+                    type="button"
+                    aria-current={active ? 'true' : undefined}
+                    className={`${styles.workbenchProviderItem} ${
+                      active ? styles.workbenchProviderItemActive : ''
+                    }`}
+                    disabled={provider.disabled}
+                    onClick={() =>
+                      !provider.disabled &&
+                      updateMemoryConfig({ provider: provider.key })
+                    }
+                  >
+                    <DatabaseOutlined />
+                    <span>
+                      <strong>{provider.name}</strong>
+                      <small>{provider.title}</small>
+                    </span>
+                    <Tag color={active ? 'blue' : 'default'}>
+                      {provider.status}
+                    </Tag>
+                    <em>{provider.description}</em>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          <section className={styles.workbenchMemoryDetail}>
+            <div className={styles.workbenchMemoryDetailHeader}>
+              <div>
+                <h2>{t('configBase.memory.mem0CloudMemory')}</h2>
+                <p>{t('configBase.memory.mem0CloudMemoryDesc')}</p>
+              </div>
+              <div className={styles.workbenchInlineActions}>
+                <Tag color={config.enabled ? 'green' : 'default'}>
+                  {config.enabled
+                    ? t('configBase.memory.enabled')
+                    : t('configBase.memory.disabled')}
+                </Tag>
+                <Button
+                  icon={<SaveOutlined />}
+                  loading={memorySaving}
+                  onClick={handleSaveMemoryConfig}
+                >
+                  {t('configBase.save')}
+                </Button>
+              </div>
+            </div>
+
+            <Spin spinning={memoryLoading}>
+              <div className={styles.workbenchMemoryDetailGrid}>
+                <div className={styles.workbenchMemoryBlock}>
+                  <div className={styles.workbenchMemoryBlockTitle}>
+                    <span>{t('configBase.memory.connectionConfig')}</span>
+                    <small>{t('configBase.memory.keyPrivacyTip')}</small>
+                  </div>
+                  <label className={styles.workbenchMemorySwitchRow}>
+                    <span>
+                      <strong>{t('configBase.memory.enableMem0')}</strong>
+                      <small>{t('configBase.memory.enableMem0Desc')}</small>
+                    </span>
+                    <Switch
+                      checked={config.enabled}
+                      onChange={checked =>
+                        updateMemoryConfig({ enabled: checked })
+                      }
+                    />
+                  </label>
+                  <div className={styles.workbenchMemoryField}>
+                    <span>API Key</span>
+                    {config.hasApiKey && !memoryApiKeyEditing ? (
+                      <div className={styles.workbenchMemoryKeyPreview}>
+                        <span>{MEMORY_API_KEY_MASK}</span>
+                        <Tag color="green">{t('configBase.memory.saved')}</Tag>
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setMemoryApiKey('');
+                            setMemoryApiKeyEditing(true);
+                          }}
+                        >
+                          {t('configBase.memory.replace')}
+                        </Button>
+                      </div>
+                    ) : (
+                      <Input.Password
+                        value={memoryApiKey}
+                        autoComplete="new-password"
+                        onChange={event => setMemoryApiKey(event.target.value)}
+                        placeholder={t('configBase.memory.apiKeyPlaceholder')}
+                      />
+                    )}
+                    <small>{keyStatus}</small>
+                    {memoryApiKeyEditing && config.hasApiKey && (
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setMemoryApiKey('');
+                          setMemoryApiKeyEditing(false);
+                        }}
+                      >
+                        {t('configBase.memory.cancelReplace')}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className={styles.workbenchMemoryBlock}>
+                  <div className={styles.workbenchMemoryBlockTitle}>
+                    <span>{t('configBase.memory.retrievalPolicy')}</span>
+                    <small>{t('configBase.memory.retrievalPolicyDesc')}</small>
+                  </div>
+                  <label className={styles.workbenchMemorySwitchRow}>
+                    <span>
+                      <strong>{t('configBase.memory.autoSearch')}</strong>
+                      <small>{t('configBase.memory.autoSearchDesc')}</small>
+                    </span>
+                    <Switch
+                      checked={config.autoSearch}
+                      onChange={checked =>
+                        updateMemoryConfig({ autoSearch: checked })
+                      }
+                    />
+                  </label>
+                  <div className={styles.workbenchMemoryGrid}>
+                    <label className={styles.workbenchMemoryField}>
+                      <span>{t('configBase.memory.searchTopK')}</span>
+                      <InputNumber
+                        min={1}
+                        max={20}
+                        value={config.searchTopK}
+                        onChange={value =>
+                          updateMemoryConfig({
+                            searchTopK: Number(value || 1),
+                          })
+                        }
+                      />
+                    </label>
+                    <label className={styles.workbenchMemoryField}>
+                      <span>{t('configBase.memory.minScore')}</span>
+                      <InputNumber
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        precision={2}
+                        value={config.minScore}
+                        onChange={value =>
+                          updateMemoryConfig({ minScore: Number(value || 0) })
+                        }
+                      />
+                    </label>
+                  </div>
+                  <div
+                    className={`${styles.workbenchMemoryHint} ${
+                      config.minScore >= 0.5
+                        ? styles.workbenchMemoryHintWarning
+                        : ''
+                    }`}
+                  >
+                    {scoreHint}
+                  </div>
+                </div>
+              </div>
+            </Spin>
+          </section>
+        </div>
+
+        <div className={styles.workbenchMemoryListPanel}>
+          <div className={styles.workbenchSectionTitle}>
+            <span>{t('configBase.memory.memoryList')}</span>
+            <div className={styles.workbenchInlineActions}>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={loadMemoryItems}
+                loading={memoryListLoading}
+              >
+                {t('configBase.CapabilityDevelopment.refresh')}
+              </Button>
+              <Popconfirm
+                title={t('configBase.memory.clearMemories')}
+                description={t('configBase.memory.clearConfirm')}
+                onConfirm={handleClearMemories}
+                okText={t('configBase.memory.clear')}
+                cancelText={t('configBase.CapabilityDevelopment.cancel')}
+              >
+                <Button danger disabled={memoryItems.length === 0}>
+                  {t('configBase.memory.clear')}
+                </Button>
+              </Popconfirm>
+            </div>
+          </div>
+          <List
+            loading={memoryListLoading}
+            dataSource={memoryItems}
+            locale={{
+              emptyText: (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={t('configBase.memory.noMemories')}
+                />
+              ),
+            }}
+            renderItem={item => (
+              <List.Item
+                key={item.id || item.memory}
+                actions={[
+                  <Popconfirm
+                    key="delete"
+                    title={t('configBase.memory.deleteMemory')}
+                    description={t('configBase.memory.deleteConfirm')}
+                    onConfirm={() => item.id && handleDeleteMemory(item.id)}
+                    okText={t('configBase.memory.delete')}
+                    cancelText={t('configBase.CapabilityDevelopment.cancel')}
+                  >
+                    <Button
+                      type="text"
+                      danger
+                      icon={<DeleteOutlined />}
+                      disabled={!item.id}
+                    />
+                  </Popconfirm>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={<span>{item.memory}</span>}
+                  description={
+                    <span className={styles.workbenchMemoryMeta}>
+                      {item.score !== undefined && item.score !== null
+                        ? `${t('configBase.memory.score')} ${item.score.toFixed(3)}`
+                        : `${t('configBase.memory.score')} -`}
+                      {item.updatedAt || item.createdAt
+                        ? ` · ${item.updatedAt || item.createdAt}`
+                        : ''}
+                    </span>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        </div>
+      </div>
+    );
+  };
+
   const renderSearchWorkspace = () => (
     <div className={styles.workbenchFormSection}>
       <Input
@@ -2014,6 +2567,7 @@ const BaseConfig: React.FC<ChatProps> = ({
     if (activeWorkbenchView === 'search') return renderSearchWorkspace();
     if (activeWorkbenchView === 'basic') return renderBasicInfoWorkspace();
     if (activeWorkbenchView === 'prompt') return renderPromptWorkspace();
+    if (activeWorkbenchView === 'memory') return renderMemoryWorkspace();
     return renderCapabilityWorkspace();
   };
 
@@ -2042,7 +2596,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                   t('configBase.agentName')}
               </div>
               <div className={styles.workbenchAgentStatus}>
-                {detailInfo?.botStatus === 2
+                {isPublishedBotStatus(detailInfo?.botStatus)
                   ? t('configBase.botStatus2')
                   : t('configBase.botStatus0')}
               </div>
@@ -2223,11 +2777,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                     message.warning(t('configBase.defaultAvatar'));
                     return;
                   }
-                  if (
-                    baseinfo?.botName == '' ||
-                    baseinfo?.botType == '' ||
-                    baseinfo?.botDesc == ''
-                  ) {
+                  if (!hasRequiredBaseInfo()) {
                     message.warning(t('configBase.requiredInfoNotFilled'));
                     return;
                   }
@@ -2255,7 +2805,9 @@ const BaseConfig: React.FC<ChatProps> = ({
                       supportContext: supportContextFlag ? 1 : 0,
                       supportSystem: supportSystemFlag ? 1 : 0,
                       name: form.getFieldsValue().botName,
-                      botType: form.getFieldsValue().botType,
+                      botType: getEffectiveBotType(
+                        form.getFieldsValue().botType
+                      ),
                       botDesc: form.getFieldsValue().botDesc,
                       botId: searchParams.get('botId'),
                       promptType: 0,
@@ -2306,7 +2858,9 @@ const BaseConfig: React.FC<ChatProps> = ({
                       supportContext: supportContextFlag ? 1 : 0,
                       supportSystem: supportSystemFlag ? 1 : 0,
                       name: form.getFieldsValue().botName,
-                      botType: form.getFieldsValue().botType,
+                      botType: getEffectiveBotType(
+                        form.getFieldsValue().botType
+                      ),
                       botDesc: form.getFieldsValue().botDesc,
                       botId: searchParams.get('botId'),
                       promptType: 0,
@@ -2358,11 +2912,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                   message.warning(t('configBase.defaultAvatar'));
                   return;
                 }
-                if (
-                  !baseinfo?.botName ||
-                  !baseinfo?.botType ||
-                  !baseinfo?.botDesc
-                ) {
+                if (!hasRequiredBaseInfo()) {
                   message.warning(t('configBase.requiredInfoNotFilled'));
                   return;
                 }
@@ -2387,7 +2937,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                           : backgroundImg,
                     }),
                     name: baseinfo.botName,
-                    botType: baseinfo.botType,
+                    botType: getEffectiveBotType(baseinfo.botType),
                     botDesc: baseinfo.botDesc,
                     supportContext: supportContextFlag ? 1 : 0,
                     supportSystem: supportSystemFlag ? 1 : 0,
@@ -2437,7 +2987,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                           : backgroundImg,
                     }),
                     name: baseinfo.botName,
-                    botType: baseinfo.botType,
+                    botType: getEffectiveBotType(baseinfo.botType),
                     botDesc: baseinfo.botDesc,
                     supportContext: supportContextFlag ? 1 : 0,
                     supportSystem: supportSystemFlag ? 1 : 0,
@@ -2606,7 +3156,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                               <div className={styles.type}>
                                 <Form.Item
                                   name="botType"
-                                  rules={[{ required: true, message: '' }]}
+                                  rules={botTypeRules}
                                   colon={false}
                                   label={t('configBase.agentCategory')}
                                 >
@@ -2895,6 +3445,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                     <PromptTry
                       ref={defaultPromptTryRef}
                       baseinfo={baseinfo}
+                      botId={currentBotId}
                       inputExample={inputExample}
                       coverUrl={coverUrl}
                       selectSource={selectSource}
@@ -2941,6 +3492,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                           }}
                           newPrompt={item.prompt}
                           baseinfo={baseinfo}
+                          botId={currentBotId}
                           inputExample={inputExample}
                           coverUrl={coverUrl}
                           selectSource={selectSource}
@@ -3017,6 +3569,7 @@ const BaseConfig: React.FC<ChatProps> = ({
                           }
                         }}
                         baseinfo={baseinfo}
+                        botId={currentBotId}
                         inputExample={inputExample}
                         coverUrl={coverUrl}
                         selectSource={selectSource}
