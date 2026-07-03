@@ -25,6 +25,10 @@ class AgentWorkflowRuntimeServiceTest {
             + "{\"name\":\"doc\",\"required\":true,\"fileType\":\"pdf\",\"schema\":{\"type\":\"string\"}}"
             + "]}}]}";
 
+    private static final String ARRAY_PROTOCOL = "{\"nodes\":[{\"id\":\"node-start::xyz\",\"data\":{\"outputs\":["
+            + "{\"name\":\"tags\",\"required\":false,\"schema\":{\"type\":\"array-string\"}}"
+            + "]}}]}";
+
     private Workflow sampleWorkflow() {
         Workflow workflow = new Workflow();
         workflow.setFlowId("flow123");
@@ -136,5 +140,84 @@ class AgentWorkflowRuntimeServiceTest {
 
         when(client.chat(any())).thenThrow(new java.io.IOException("boom"));
         assertThat(service.runWorkflow(def, "u", new JSONObject())).contains("WORKFLOW_CALL_FAILED");
+    }
+
+    @Test
+    void runWorkflow_invalidJsonResponse_returnsBadResponseError() throws Exception {
+        WorkflowMapper mapper = mock(WorkflowMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of(sampleWorkflow()));
+        WorkflowChatRunClient client = mock(WorkflowChatRunClient.class);
+        when(client.chat(any())).thenReturn("not json");
+
+        AgentWorkflowRuntimeService service = newService(mapper, client);
+        AgentWorkflowDefinition def = service.resolveWorkflows(List.of("flow123")).get(0);
+
+        assertThat(service.runWorkflow(def, "u", new JSONObject())).contains("WORKFLOW_BAD_RESPONSE");
+    }
+
+    @Test
+    void runWorkflow_noChoicesInResponse_returnsEmptyResponseError() throws Exception {
+        WorkflowMapper mapper = mock(WorkflowMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of(sampleWorkflow()));
+        WorkflowChatRunClient client = mock(WorkflowChatRunClient.class);
+        AgentWorkflowRuntimeService service = newService(mapper, client);
+        AgentWorkflowDefinition def = service.resolveWorkflows(List.of("flow123")).get(0);
+
+        when(client.chat(any())).thenReturn("{}");
+        assertThat(service.runWorkflow(def, "u", new JSONObject())).contains("WORKFLOW_EMPTY_RESPONSE");
+
+        when(client.chat(any())).thenReturn("{\"code\":0,\"choices\":[]}");
+        assertThat(service.runWorkflow(def, "u", new JSONObject())).contains("WORKFLOW_EMPTY_RESPONSE");
+    }
+
+    @Test
+    void resolveWorkflows_buildsArraySchemaForArrayStringType() {
+        Workflow workflow = sampleWorkflow();
+        workflow.setPublishedData(ARRAY_PROTOCOL);
+        WorkflowMapper mapper = mock(WorkflowMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of(workflow));
+
+        List<AgentWorkflowDefinition> defs =
+                newService(mapper, mock(WorkflowChatRunClient.class)).resolveWorkflows(List.of("flow123"));
+
+        assertThat(defs).hasSize(1);
+        JSONObject schema = JSON.parseObject(defs.get(0).getInputSchema());
+        JSONObject tags = schema.getJSONObject("properties").getJSONObject("tags");
+        assertThat(tags.getString("type")).isEqualTo("array");
+        assertThat(tags.getJSONObject("items").getString("type")).isEqualTo("string");
+    }
+
+    @Test
+    void resolveWorkflows_resolvesFunctionNameCollisionBySuffix() {
+        Workflow first = sampleWorkflow();
+        first.setFlowId("flow#1");
+        Workflow second = sampleWorkflow();
+        second.setFlowId("flow_1");
+        WorkflowMapper mapper = mock(WorkflowMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of(first, second));
+
+        List<AgentWorkflowDefinition> defs =
+                newService(mapper, mock(WorkflowChatRunClient.class)).resolveWorkflows(List.of("flow#1", "flow_1"));
+
+        assertThat(defs).hasSize(2);
+        assertThat(defs.get(0).getFunctionName()).isEqualTo("workflow_flow_1");
+        assertThat(defs.get(1).getFunctionName()).isEqualTo("workflow_flow_1_2");
+    }
+
+    @Test
+    void resolveWorkflows_truncatesLongFunctionNameToMaxLength() {
+        String longFlowId = "a".repeat(80);
+        Workflow workflow = sampleWorkflow();
+        workflow.setFlowId(longFlowId);
+        WorkflowMapper mapper = mock(WorkflowMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of(workflow));
+
+        List<AgentWorkflowDefinition> defs =
+                newService(mapper, mock(WorkflowChatRunClient.class)).resolveWorkflows(List.of(longFlowId));
+
+        assertThat(defs).hasSize(1);
+        String functionName = defs.get(0).getFunctionName();
+        assertThat(functionName.length()).isLessThanOrEqualTo(64);
+        assertThat(functionName).startsWith("workflow_aaa");
     }
 }
