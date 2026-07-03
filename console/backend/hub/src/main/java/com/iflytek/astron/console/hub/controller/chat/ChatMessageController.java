@@ -401,6 +401,7 @@ public class ChatMessageController {
         debugChatReqDto.setMcpServerUrls(debugRequest.getMcpServerUrls());
         debugChatReqDto.setSkills(debugRequest.getSkills());
         debugChatReqDto.setTools(debugRequest.getTools());
+        debugChatReqDto.setWorkflows(debugRequest.getWorkflows());
         debugChatReqDto.setModel(debugRequest.getModel());
         debugChatReqDto.setModelId(debugRequest.getModelId());
         debugChatReqDto.setMaasDatasetList(maasDatasetList);
