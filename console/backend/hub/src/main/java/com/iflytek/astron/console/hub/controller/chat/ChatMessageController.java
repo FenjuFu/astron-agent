@@ -414,7 +414,14 @@ public class ChatMessageController {
 
         // Debug requests carry workflows straight from the client; enforce the same ownership
         // gate as save, otherwise any user could run another owner's workflow via crafted input.
-        if (!agentWorkflowRuntimeService.checkWorkflowsAccessible(uid, SpaceInfoUtil.getSpaceId(), debugRequest.getWorkflows())) {
+        Long spaceId = SpaceInfoUtil.getSpaceId();
+        // space-id is a client-supplied header and botDebug has no @SpacePreAuth membership
+        // aspect; without verified membership the same-space leg of the ownership check must
+        // not apply.
+        if (spaceId != null && !SpaceInfoUtil.checkUserBelongSpace()) {
+            spaceId = null;
+        }
+        if (!agentWorkflowRuntimeService.checkWorkflowsAccessible(uid, spaceId, debugRequest.getWorkflows())) {
             SseEmitterUtil.completeWithError(sseEmitter, "Workflow not accessible");
             return sseEmitter;
         }
