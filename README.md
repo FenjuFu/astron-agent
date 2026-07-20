@@ -4,6 +4,10 @@
 
 [![Astron_Readme](./docs/imgs/Astron_Readme.png)](https://agent.xfyun.cn)
 
+<p align="center">
+   <a href="https://trendshift.io/repositories/17278?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-17278" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/17278" alt="iflytek%2Fastron-agent | Trendshift" width="250" height="55"/></a>
+</p>
+
 [![License](https://img.shields.io/badge/license-apache2.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/iflytek/astron-agent?style=social)](https://github.com/iflytek/astron-agent/stargazers)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/iflytek/astron-agent)
@@ -158,3 +162,15 @@ We welcome contributions of all kinds! Please see our [Contributing Guide](CONTR
 ## 📄 Open Source License
 
 This project is licensed under the [Apache 2.0 License](LICENSE), allowing free use, modification, distribution, and commercial use without any restrictions.
+
+---
+
+<p align="center">
+  <a href="https://landscape.cncf.io/?landscape=observability-and-analysis&group=ai-native&item=ai-agent--workflow-orchestration--astron-agent">
+    <img src="https://raw.githubusercontent.com/cncf/artwork/refs/heads/main/other/cncf-landscape/horizontal/color/cncf-landscape-horizontal-color.svg" width="300" alt="CNCF Landscape" />
+  </a>
+</p>
+<p align="center">
+  Astron Agent is listed in the <a href="https://landscape.cncf.io/?landscape=observability-and-analysis&group=ai-native&item=ai-agent--workflow-orchestration--astron-agent">CNCF Landscape</a>.
+</p>
+
