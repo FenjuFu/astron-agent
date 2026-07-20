@@ -12,7 +12,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/iflytek/astron-agent?style=social)](https://github.com/iflytek/astron-agent/stargazers)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/iflytek/astron-agent)
 
-English | [简体中文](docs/zh/README.md)
+English | [简体中文](docs/zh/README.md) | [日本語](docs/ja/README.md)
 
 </div>
 
