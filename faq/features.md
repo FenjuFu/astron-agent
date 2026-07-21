@@ -389,3 +389,108 @@ http {
 - **开源自建版**：自己用 Docker Compose / Helm 部署，数据完全自持，模型可以接入任意 OpenAI 协议兼容服务。
 
 三者代码同源但环境隔离，账号、数据、额度都不互通。
+
+## 新版本里「一句话创建智能体」还需要绑定讯飞开放平台吗？
+
+不需要。新版本中 Agent 内置的 AI 能力已经与讯飞开放平台解耦，只需在 `.env` 中配置任意 OpenAI 协议兼容模型的 URL 和 Key，即可自动调用该模型完成一句话创建。
+
+![.env 中配置 AI Ability Chat 相关变量](assets/oneline_create_agent_env.png)
+
+## 怎么切换中英文界面？
+
+点击左下角的用户头像，在弹出菜单中点击「EN」即可切换到英文界面，再次操作可切回中文。
+
+![切换界面语言](assets/switch_language_setting.png)
+
+## 工作流调试时，怎么查看中间节点的输入输出？
+
+调试运行结束后，点击对应节点右上角的绿色箭头，会展开「运行结果」面板，可以看到该节点的**输入**、**原始输出**和**输出**三段内容，便于定位是哪个节点的数据不对。
+
+![查看中间节点的运行结果](assets/workflow_debug_node_output.png)
+
+## 工作流中代码节点执行超时怎么办？
+
+打开代码节点配置面板底部的「异常处理」开关，把「超时时间」调整为合理值，并按需设置重试次数与异常处理方式。
+
+![代码节点异常处理与超时设置](assets/code_node_timeout_setting.jpeg)
+
+## 怎么把工作流发布为 API 供外部调用？
+
+1. 工作流调试通过后，点击右上角「发布」，在「申请发布」弹窗中选择「发布为 API」并点击「配置」。
+
+![申请发布中选择发布为 API](assets/workflow_publish_api_1.png)
+
+2. 绑定一个应用；如果还没有应用，点击「立即创建」新建一个。
+
+![创建并绑定应用](assets/workflow_publish_api_2.png)
+
+3. 绑定成功后即可在「服务接口认证信息」中看到接口地址、API Secret、API Key 和 API Flowid，页面还提供 python / java 的 demo 下载。
+
+![获取接口地址与鉴权信息](assets/workflow_publish_api_3.png)
+
+注意：应用绑定后无法修改，请谨慎选择。调用时鉴权头格式为 `Authorization: Bearer {API_KEY}:{API_SECRET}`。
+
+## 工作流怎么实现视觉理解（图片理解）？
+
+目前暂不支持原生多模态大模型的视觉输入，可以通过插件广场中的「图片理解」「文生图」等插件实现相关能力；原生多模态支持将在后续版本推出。
+
+![插件广场中的图片理解与文生图插件](assets/workflow_vision_plugin.png)
+
+## 发送邮件插件怎么正确配置？
+
+1. **使用授权码而不是登录密码**。以 QQ 邮箱为例，在邮箱设置中开启 POP3/IMAP/SMTP 服务并「生成授权码」，把授权码填入插件配置。
+
+![邮箱开启 SMTP 服务并生成授权码](assets/email_plugin_authcode.png)
+
+2. **收件邮箱地址要配置为数组格式**，即使只有一个收件人。
+
+![收件人配置为数组格式](assets/email_plugin_recipient_array.png)
+
+## 在工作流画布中怎么批量选择和复制节点？
+
+1. 点击画布底部工具栏最左侧的交互模式按钮，切换到「触控板友好模式」。
+
+![切换到触控板友好模式](assets/canvas_touchpad_mode.png)
+
+2. 之后就可以在画布上框选多个节点，复制粘贴即可。
+
+![框选节点后复制](assets/canvas_box_select.png)
+
+## 工作流的调用链路日志（Trace）怎么开启？
+
+1. 在 `docker-compose.yaml` 中取消 `elasticsearch`、`kibana`、`kafka`、`logstash` 四个组件容器的注释。
+
+![取消四个可观测性组件的注释](assets/trace_compose_components.png)
+
+2. 将环境变量 `KAFKA_ENABLE` 置为 `1`。
+3. 重新启动项目，编排页右上角会出现「Trace日志」入口，点击即可查看对应的调用链路。
+
+![编排页的 Trace 日志入口](assets/trace_log_view.png)
+
+## 标准 HTTP 插件只支持 JSON Object，但接口要求顶层是 JSON Array 怎么办？
+
+工作流中的标准 HTTP 插件节点默认请求体为 JSON Object（键值对）。如果外部接口强制要求顶层为数组（例如 `[{"skuId": ...}]`），建议改用**代码节点**：用一小段 Python 直接构建所需的数组结构并发起请求，从而绕过插件的结构限制。
+
+## RPA 客户端创建 API Key 时提示 502 Bad Gateway？
+
+1. 查看 `openapi-service` 服务的日志定位具体报错。
+2. 尝试执行 `docker compose pull` 将 `openapi-service` 镜像更新到最新版本后重启。
+
+## Agent 怎么调用 RPA？
+
+1. 确认 `.env` 中的 `HOST_BASE_ADDRESS` 配置正确（远程部署时应为公网 IP / 域名，而非 `localhost`）。
+2. 使用 `docker compose -f docker-compose-with-auth-rpa.yaml up -d` 启动，该 compose 文件会同时拉起 Agent 与 RPA 后端服务，无需额外配置。
+3. 前往 [astron-rpa](https://github.com/iflytek/astron-rpa) 下载客户端，修改安装目录下 `resources` 中的配置文件指向你的 RPA 服务端地址，然后即可在客户端编排并执行机器人。
+
+## Agent 有几种接入 RAG（知识库）的方式？
+
+两种：
+
+1. **自建 RAGFlow**：自行部署开源 RAGFlow，或使用 `docker/ragflow` 目录下的脚本部署，然后通过 `RAGFLOW_*` 等环境变量接入。
+2. **星火云端知识库**：关联讯飞开放平台并开通知识库能力，获取知识库数据集 ID 后配置到环境变量。
+
+两种方式的详细步骤参见部署文档 `docs/zh/DEPLOYMENT_GUIDE_WITH_AUTH.md`。
+
+## 智能体输出多模态内容（文字、图片、代码）时，前端如何解析显示？
+
+前端统一按 Markdown 格式标准进行解析与渲染，因此智能体输出时按 Markdown 语法组织内容即可正确显示。
