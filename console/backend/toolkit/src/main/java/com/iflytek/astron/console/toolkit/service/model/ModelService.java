@@ -105,6 +105,7 @@ public class ModelService extends ServiceImpl<ModelMapper, Model> {
     private static final String CODE_NODE_SWITCH = "switch";
 
     private static final String CAT_IP_BLACKLIST = "NETWORK_SEGMENT_BLACK_LIST";
+    private static final String CAT_IP_WHITELIST = "IP_WHITE_LIST";
     private static final String PROVIDER_OPENAI = "openai";
     private static final String PROVIDER_ANTHROPIC = "anthropic";
     private static final String PROVIDER_GOOGLE = "google";
@@ -248,22 +249,13 @@ public class ModelService extends ServiceImpl<ModelMapper, Model> {
      */
     private String buildModelApiUrlNew(String baseUrl, String provider, String modelDomain) {
         try {
-            // Read IP blacklist from database
-            List<ConfigInfo> list = configInfoMapper.getListByCategory(CAT_IP_BLACKLIST);
-            String rawBlacklist = (list != null && !list.isEmpty()) ? list.getFirst().getValue() : "";
-            List<String> databaseBlacklist =
-                    StrUtil.isBlank(rawBlacklist)
-                            ? Collections.emptyList()
-                            : Arrays.stream(rawBlacklist.split(","))
-                                    .map(String::trim)
-                                    .filter(StrUtil::isNotBlank)
-                                    .toList();
-            // Merge database blacklist with default blacklist
-            List<String> mergedBlacklist = new ArrayList<>(databaseBlacklist);
+            List<String> ipBlacklist = loadIpRules(CAT_IP_BLACKLIST);
+            List<String> ipWhitelist = loadIpRules(CAT_IP_WHITELIST);
             SsrfProperties ssrfProperties = new SsrfProperties();
             // Note: The underlying object field name is ipBlaklist (third-party spelling), maintain
             // compatibility
-            ssrfProperties.setIpBlaklist(mergedBlacklist);
+            ssrfProperties.setIpBlaklist(ipBlacklist);
+            ssrfProperties.setIpWhitelist(ipWhitelist);
 
             // 0) Remove userInfo and normalize
             String stripped = SsrfValidators.stripUserInfo(baseUrl);
@@ -307,6 +299,19 @@ public class ModelService extends ServiceImpl<ModelMapper, Model> {
             log.error("model url check failed: {}", e.getMessage(), e);
             throw new BusinessException(ResponseEnum.MODEL_CHECK_FAILED);
         }
+    }
+
+    private List<String> loadIpRules(String category) {
+        List<ConfigInfo> configs = configInfoMapper.getListByCategory(category);
+        String rawValue = (configs != null && !configs.isEmpty()) ? configs.getFirst().getValue() : "";
+        if (StrUtil.isBlank(rawValue)) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(rawValue.split(","))
+                .map(String::trim)
+                .filter(StrUtil::isNotBlank)
+                .distinct()
+                .toList();
     }
 
     private String appendPathSegment(String basePath, String appendPath) {

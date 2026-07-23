@@ -4,6 +4,7 @@ import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.exception.BusinessException;
 import com.iflytek.astron.console.toolkit.entity.table.ConfigInfo;
 import com.iflytek.astron.console.toolkit.mapper.ConfigInfoMapper;
+import com.iflytek.astron.console.toolkit.util.ssrf.SsrfValidators;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -52,6 +53,7 @@ public class UrlCheckTool {
     private static final String IP_CATEGORY = "IP_BLACK_LIST";
     private static final String NETWORK_SEGMENT_CATEGORY = "NETWORK_SEGMENT_BLACK_LIST";
     private static final String DOMAIN_WHITE_CATEGORY = "DOMAIN_WHITE_LIST";
+    private static final String IP_WHITE_CATEGORY = "IP_WHITE_LIST";
 
     // ===== Other constants =====
     private static final int CONNECT_TIMEOUT_MS = (int) Duration.ofSeconds(5).toMillis();
@@ -77,11 +79,15 @@ public class UrlCheckTool {
      * @return the redirected URL if redirect found, otherwise the original URL
      */
     public String getRedirectUrl(String url) {
+        return getRedirectUrl(url, readCsvConfig(IP_WHITE_CATEGORY));
+    }
+
+    protected String getRedirectUrl(String url, List<String> ipWhiteList) {
         if (StringUtils.isBlank(url))
             return url;
 
         try {
-            RedirectLookupResult result = lookupRedirect(url);
+            RedirectLookupResult result = lookupRedirect(url, ipWhiteList);
             if (REDIRECT_STATUS_CODES.contains(result.statusCode)
                     && StringUtils.isNotBlank(result.location)) {
                 return new URL(new URL(url), result.location).toString();
@@ -93,11 +99,11 @@ public class UrlCheckTool {
         return url;
     }
 
-    private RedirectLookupResult lookupRedirect(String url) throws IOException {
+    private RedirectLookupResult lookupRedirect(String url, List<String> ipWhiteList) throws IOException {
         HttpURLConnection conn = null;
         try {
             URL u = toSafeHttpUrl(url);
-            ensurePublicAddresses(u.getHost());
+            ensurePublicAddresses(u.getHost(), ipWhiteList);
             URLConnection urlConnection = u.openConnection();
             if (!(urlConnection instanceof HttpURLConnection httpURLConnection)) {
                 throw new BusinessException(ResponseEnum.TOOLBOX_URL_HTTP_HTTPS_ONLY);
@@ -176,16 +182,18 @@ public class UrlCheckTool {
             List<String> ipBlackList = readCsvConfig(IP_CATEGORY);
             List<String> segmentBlackList = readCsvConfig(NETWORK_SEGMENT_CATEGORY);
             List<String> domainWhiteList = readCsvConfig(DOMAIN_WHITE_CATEGORY);
+            List<String> ipWhiteList = readCsvConfig(IP_WHITE_CATEGORY);
 
             String currentUrl = url;
             Set<String> visitedUrls = new HashSet<>();
             for (int i = 0; i <= MAX_REDIRECTS; i++) {
-                validateUrlPolicy(currentUrl, ipBlackList, segmentBlackList, domainWhiteList);
+                validateUrlPolicy(
+                        currentUrl, ipBlackList, segmentBlackList, domainWhiteList, ipWhiteList);
                 if (!visitedUrls.add(currentUrl)) {
                     throw new BusinessException(ResponseEnum.TOOLBOX_URL_ILLEGAL);
                 }
 
-                String redirectUrl = getRedirectUrl(currentUrl);
+                String redirectUrl = getRedirectUrl(currentUrl, ipWhiteList);
                 if (currentUrl.equals(redirectUrl)) {
                     return;
                 }
@@ -203,13 +211,15 @@ public class UrlCheckTool {
 
     private void validateUrlPolicy(String url, List<String> ipBlackList,
             List<String> segmentBlackList,
-            List<String> domainWhiteList) throws Exception {
+            List<String> domainWhiteList,
+            List<String> ipWhiteList) throws Exception {
         checkHttpOrHttps(url);
         symbolCheck(url);
         IPv4MappedCheck(url);
         checkUrlForIPv6(url);
         resolveShortLink(url);
-        validateUrlAgainstBlacklist(url, ipBlackList, segmentBlackList, domainWhiteList);
+        validateUrlAgainstBlacklist(
+                url, ipBlackList, segmentBlackList, domainWhiteList, ipWhiteList);
     }
 
     /**
@@ -223,7 +233,8 @@ public class UrlCheckTool {
      */
     private void validateUrlAgainstBlacklist(String url, List<String> ipBlackList,
             List<String> segmentBlackList,
-            List<String> domainWhiteList) throws Exception {
+            List<String> domainWhiteList,
+            List<String> ipWhiteList) throws Exception {
         URI uri = new URI(url);
         String host = uri.getHost();
         if (StringUtils.isBlank(host))
@@ -242,7 +253,12 @@ public class UrlCheckTool {
             throw new BusinessException(ResponseEnum.TOOLBOX_URL_ILLEGAL);
         }
         for (InetAddress inet : addresses) {
-            if (isRestrictedAddress(inet)) {
+            if (SsrfValidators.isIpLiteral(asciiHost)
+                    && SsrfValidators.isAddressMatchedByIpRules(inet, ipWhiteList)) {
+                log.debug("URL destination allowed by IP whitelist, host={}, ip={}", asciiHost, inet.getHostAddress());
+                continue;
+            }
+            if (SsrfValidators.isRestrictedAddress(inet)) {
                 throw new BusinessException(ResponseEnum.TOOLBOX_URL_ILLEGAL);
             }
             String ip = inet.getHostAddress();
@@ -521,24 +537,13 @@ public class UrlCheckTool {
         }
     }
 
-    private void ensurePublicAddresses(String host) throws UnknownHostException {
+    private void ensurePublicAddresses(String host, List<String> ipWhiteList) throws UnknownHostException {
+        boolean ipLiteral = SsrfValidators.isIpLiteral(host);
         for (InetAddress address : InetAddress.getAllByName(host)) {
-            if (isRestrictedAddress(address)) {
+            if (!(ipLiteral && SsrfValidators.isAddressMatchedByIpRules(address, ipWhiteList))
+                    && SsrfValidators.isRestrictedAddress(address)) {
                 throw new BusinessException(ResponseEnum.TOOLBOX_URL_ILLEGAL);
             }
         }
-    }
-
-    private boolean isRestrictedAddress(InetAddress address) {
-        return address.isAnyLocalAddress()
-                || address.isLoopbackAddress()
-                || address.isLinkLocalAddress()
-                || address.isSiteLocalAddress()
-                || address.isMulticastAddress()
-                || address.isMCGlobal()
-                || address.isMCLinkLocal()
-                || address.isMCNodeLocal()
-                || address.isMCOrgLocal()
-                || address.isMCSiteLocal();
     }
 }

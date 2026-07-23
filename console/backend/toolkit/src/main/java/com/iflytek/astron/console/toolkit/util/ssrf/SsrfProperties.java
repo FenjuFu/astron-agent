@@ -36,6 +36,15 @@ public class SsrfProperties {
     private List<String> ipBlaklist = new ArrayList<>();
 
     /**
+     * IP addresses or CIDR ranges allowed to bypass IP blacklist checks.
+     *
+     * <p>
+     * The whitelist only affects destination IP policy. URL scheme and syntax validation still apply.
+     * </p>
+     */
+    private List<String> ipWhitelist = new ArrayList<>();
+
+    /**
      * Allowed URL schemes.
      *
      * <p>

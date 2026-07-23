@@ -182,6 +182,8 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     private static final String FIELD_IS_LATEST = "isLatest";
     private static final String FIELD_LATEST_VER = "latestVersion";
     private static final String FIELD_CURR_VER = "currentVersion";
+    private static final String IP_BLACKLIST_CATEGORY = "NETWORK_SEGMENT_BLACK_LIST";
+    private static final String IP_WHITELIST_CATEGORY = "IP_WHITE_LIST";
 
     @Value("${spring.profiles.active}")
     String env;
@@ -1867,9 +1869,9 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
     // ========== 5. SSRF/URL validation ==========
     private void validateSsrfForNodes(BizWorkflowData bizWorkflowData) {
-        List<String> ipBlacklist = loadIpBlacklist();
         SsrfProperties ssrfProps = new SsrfProperties();
-        ssrfProps.setIpBlaklist(ipBlacklist);
+        ssrfProps.setIpBlaklist(loadIpRules(IP_BLACKLIST_CATEGORY));
+        ssrfProps.setIpWhitelist(loadIpRules(IP_WHITELIST_CATEGORY));
         SsrfParamGuard ssrfGuard = new SsrfParamGuard(ssrfProps);
 
         for (BizWorkflowNode node : bizWorkflowData.getNodes()) {
@@ -1900,8 +1902,8 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         }
     }
 
-    private List<String> loadIpBlacklist() {
-        List<ConfigInfo> cfgList = configInfoMapper.getListByCategory("NETWORK_SEGMENT_BLACK_LIST");
+    private List<String> loadIpRules(String category) {
+        List<ConfigInfo> cfgList = configInfoMapper.getListByCategory(category);
         if (cfgList == null || cfgList.isEmpty() || StringUtils.isBlank(cfgList.get(0).getValue())) {
             return Collections.emptyList();
         }

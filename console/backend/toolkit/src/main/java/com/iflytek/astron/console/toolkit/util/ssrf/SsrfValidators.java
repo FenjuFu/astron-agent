@@ -33,6 +33,25 @@ public final class SsrfValidators {
     private static final Set<String> ALLOWED_SCHEMES =
             new HashSet<>(Arrays.asList("http", "https", "ws", "wss"));
 
+    private static final IpRules NON_PUBLIC_IP_RULES = parseIpRules(List.of(
+            "0.0.0.0/8",
+            "100.64.0.0/10",
+            "192.0.0.0/24",
+            "192.0.2.0/24",
+            "192.88.99.0/24",
+            "198.18.0.0/15",
+            "198.51.100.0/24",
+            "203.0.113.0/24",
+            "240.0.0.0/4",
+            "::/96",
+            "64:ff9b::/96",
+            "64:ff9b:1::/48",
+            "100::/64",
+            "2001::/23",
+            "2001:db8::/32",
+            "2002::/16",
+            "fc00::/7"));
+
     private SsrfValidators() {}
 
     /**
@@ -65,8 +84,24 @@ public final class SsrfValidators {
     public static boolean isIpLiteral(String host) {
         if (host == null)
             return false;
+        String literal = normalizeHostLiteral(host);
+        if (literal.contains(":")) {
+            try {
+                InetAddress.getByName(literal);
+                return true;
+            } catch (Exception ignore) {
+                return false;
+            }
+        }
+        if (!literal.matches("(?:\\d{1,3}\\.){3}\\d{1,3}")) {
+            return false;
+        }
         try {
-            InetAddress.getByName(host);
+            for (String octet : literal.split("\\.")) {
+                if (Integer.parseInt(octet) > 255) {
+                    return false;
+                }
+            }
             return true;
         } catch (Exception ignore) {
             return false;
@@ -153,6 +188,22 @@ public final class SsrfValidators {
      * @return true if in blacklist, false otherwise
      */
     public static boolean isHostBlockedByIpBlacklist(String host, List<String> ipBlacklist, Dns dns) {
+        return isHostBlockedByIpBlacklist(host, ipBlacklist, Collections.emptyList(), dns);
+    }
+
+    /**
+     * Check whether a host resolves to an IP blocked by the blacklist, with whitelist precedence. Every
+     * resolved address is evaluated independently, so one whitelisted address cannot hide a different
+     * blacklisted address returned by DNS.
+     *
+     * @param host target host or IP literal
+     * @param ipBlacklist blocked exact IPs or CIDR ranges
+     * @param ipWhitelist allowed exact IPs or CIDR ranges
+     * @param dns DNS implementation used for hostnames
+     * @return true if any non-whitelisted destination address is blacklisted
+     */
+    public static boolean isHostBlockedByIpBlacklist(
+            String host, List<String> ipBlacklist, List<String> ipWhitelist, Dns dns) {
         if (host == null || ipBlacklist == null || ipBlacklist.isEmpty())
             return false;
 
@@ -170,38 +221,128 @@ public final class SsrfValidators {
             if (targetIps.isEmpty())
                 return false;
 
-            // 2) Preprocess blacklist
-            Set<String> exactIpSet = new HashSet<>();
-            List<Cidr> cidrList = new ArrayList<>();
-            for (String entry : ipBlacklist) {
-                if (entry == null || entry.trim().isEmpty())
-                    continue;
-                String e = entry.trim();
-                if (e.contains("/")) {
-                    Cidr cidr = parseCidr(e);
-                    if (cidr != null)
-                        cidrList.add(cidr);
-                } else {
-                    String canon = canonicalIp(e);
-                    if (canon != null)
-                        exactIpSet.add(canon);
-                }
-            }
+            IpRules blacklistRules = parseIpRules(ipBlacklist);
+            IpRules whitelistRules = isIpLiteral(literal)
+                    ? parseIpRules(ipWhitelist)
+                    : parseIpRules(Collections.emptyList());
 
-            // 3) Match each IP
+            // 2) Match each IP. Whitelist precedence applies only to the matching address.
             for (InetAddress ip : targetIps) {
-                String canon = canonicalIp(ip);
-                if (canon != null && exactIpSet.contains(canon)) {
+                if (!matchesIpRules(ip, whitelistRules) && matchesIpRules(ip, blacklistRules)) {
                     return true;
-                }
-                for (Cidr cidr : cidrList) {
-                    if (ipInCidr(ip, cidr)) {
-                        return true;
-                    }
                 }
             }
         } catch (Exception ignore) {
             // Resolution failure / DNS exception treated as not hit; stricter handling can return true
+        }
+        return false;
+    }
+
+    /**
+     * Apply the complete destination IP policy used by model and workflow requests. Restricted
+     * addresses are denied by default, and explicit blacklist rules are applied to all other addresses.
+     * IP whitelist rules can only exempt an IP literal in the URL, avoiding a DNS name switching
+     * addresses between validation and connection.
+     *
+     * @param host target host or IP literal
+     * @param ipBlacklist blocked exact IPs or CIDR ranges
+     * @param ipWhitelist allowed exact IPs or CIDR ranges for IP-literal URLs
+     * @param dns DNS implementation used for hostnames
+     * @return true when the destination must be denied
+     */
+    public static boolean isHostDeniedByIpPolicy(
+            String host, List<String> ipBlacklist, List<String> ipWhitelist, Dns dns) {
+        if (host == null) {
+            return true;
+        }
+        try {
+            String literal = normalizeHostLiteral(host);
+            boolean ipLiteral = isIpLiteral(literal);
+            List<InetAddress> targetIps = ipLiteral
+                    ? Collections.singletonList(InetAddress.getByName(literal))
+                    : resolveAll(dns, literal);
+            if (targetIps.isEmpty()) {
+                return true;
+            }
+
+            IpRules blacklistRules = parseIpRules(ipBlacklist);
+            IpRules whitelistRules = ipLiteral
+                    ? parseIpRules(ipWhitelist)
+                    : parseIpRules(Collections.emptyList());
+            for (InetAddress ip : targetIps) {
+                if (matchesIpRules(ip, whitelistRules)) {
+                    continue;
+                }
+                if (isRestrictedAddress(ip) || matchesIpRules(ip, blacklistRules)) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    /** Determine whether an address is local, private, link-local, or multicast. */
+    public static boolean isRestrictedAddress(InetAddress address) {
+        return address == null
+                || address.isAnyLocalAddress()
+                || address.isLoopbackAddress()
+                || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress()
+                || address.isMulticastAddress()
+                || address.isMCGlobal()
+                || address.isMCLinkLocal()
+                || address.isMCNodeLocal()
+                || address.isMCOrgLocal()
+                || address.isMCSiteLocal()
+                || matchesIpRules(address, NON_PUBLIC_IP_RULES);
+    }
+
+    /**
+     * Check whether an already resolved address matches an exact IP or CIDR rule. Invalid entries and
+     * hostnames are ignored.
+     *
+     * @param address resolved destination address
+     * @param rules exact IPs or CIDR ranges
+     * @return true when the address matches at least one valid rule
+     */
+    public static boolean isAddressMatchedByIpRules(InetAddress address, List<String> rules) {
+        return address != null && matchesIpRules(address, parseIpRules(rules));
+    }
+
+    private static IpRules parseIpRules(List<String> entries) {
+        Set<String> exactIpSet = new HashSet<>();
+        List<Cidr> cidrList = new ArrayList<>();
+        if (entries == null) {
+            return new IpRules(exactIpSet, cidrList);
+        }
+        for (String entry : entries) {
+            if (entry == null || entry.trim().isEmpty())
+                continue;
+            String value = entry.trim();
+            if (value.contains("/")) {
+                Cidr cidr = parseCidr(value);
+                if (cidr != null)
+                    cidrList.add(cidr);
+            } else {
+                String canonical = canonicalIp(value);
+                if (canonical != null)
+                    exactIpSet.add(canonical);
+            }
+        }
+        return new IpRules(exactIpSet, cidrList);
+    }
+
+    private static boolean matchesIpRules(InetAddress ip, IpRules rules) {
+        String canonical = canonicalIp(ip);
+        if (canonical != null && rules.exactIps.contains(canonical)) {
+            return true;
+        }
+        for (Cidr cidr : rules.cidrs) {
+            if (ipInCidr(ip, cidr)) {
+                return true;
+            }
         }
         return false;
     }
@@ -217,6 +358,9 @@ public final class SsrfValidators {
 
     /** Generate canonical IP string for IPv4/IPv6; return null if invalid. */
     private static String canonicalIp(String ipText) {
+        if (!isIpLiteral(ipText)) {
+            return null;
+        }
         try {
             return canonicalIp(InetAddress.getByName(ipText));
         } catch (Exception e) {
@@ -251,6 +395,8 @@ public final class SsrfValidators {
             String base = s.substring(0, slash).trim();
             int prefix = Integer.parseInt(s.substring(slash + 1).trim());
 
+            if (!isIpLiteral(base))
+                return null;
             InetAddress baseAddr = InetAddress.getByName(base);
             int maxBits = baseAddr.getAddress().length * 8;
             if (prefix < 0 || prefix > maxBits)
@@ -291,6 +437,16 @@ public final class SsrfValidators {
         Cidr(InetAddress network, int prefix) {
             this.network = network;
             this.prefix = prefix;
+        }
+    }
+
+    private static final class IpRules {
+        final Set<String> exactIps;
+        final List<Cidr> cidrs;
+
+        IpRules(Set<String> exactIps, List<Cidr> cidrs) {
+            this.exactIps = exactIps;
+            this.cidrs = cidrs;
         }
     }
 
