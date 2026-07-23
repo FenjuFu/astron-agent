@@ -1037,7 +1037,7 @@ class BaseLLMNode(BaseNode):
     apiSecret: str = Field(default="")
 
     url: str = Field(default="")
-    temperature: float = Field(gt=0, le=1, default=1.0)
+    temperature: float = Field(ge=0, le=1, default=1.0)
     maxTokens: int = Field(gt=0, default=2048)
     uid: str = Field(default="")
     template: str = Field(default="")
