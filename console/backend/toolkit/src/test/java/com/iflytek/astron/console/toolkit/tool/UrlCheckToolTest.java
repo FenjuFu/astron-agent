@@ -78,11 +78,68 @@ class UrlCheckToolTest {
     }
 
     @Test
+    void checkBlackListAllowsWhitelistedRedirectTarget() {
+        ConfigInfoMapper mapper = mockConfigMapper(
+                "", "127.0.0.0/8,169.254.0.0/16", "127.0.0.1,169.254.169.254");
+        UrlCheckTool tool = new RedirectingUrlCheckTool(mapper, Map.of(
+                "http://127.0.0.1/start", "http://169.254.169.254/target"));
+
+        tool.checkBlackList("http://127.0.0.1/start");
+    }
+
+    @Test
+    void checkBlackListRejectsRedirectTargetOutsideWhitelist() {
+        ConfigInfoMapper mapper = mockConfigMapper(
+                "", "127.0.0.0/8,169.254.0.0/16", "127.0.0.1");
+        UrlCheckTool tool = new RedirectingUrlCheckTool(mapper, Map.of(
+                "http://127.0.0.1/start", "http://169.254.169.254/target"));
+
+        assertThrows(BusinessException.class,
+                () -> tool.checkBlackList("http://127.0.0.1/start"));
+    }
+
+    @Test
     void checkUrlRejectsLoopbackAddressDirectly() {
         ConfigInfoMapper mapper = mockConfigMapper("", "");
         UrlCheckTool tool = new UrlCheckTool(mapper);
 
         assertThrows(BusinessException.class, () -> tool.checkUrl("http://127.0.0.1/internal"));
+    }
+
+    @Test
+    void checkUrlAllowsIpInWhitelist() throws Exception {
+        ConfigInfoMapper mapper = mockConfigMapper("", "127.0.0.0/8", "127.0.0.1");
+        UrlCheckTool tool = new UrlCheckTool(mapper);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/allowed", exchange -> {
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/allowed";
+            tool.checkUrl(url);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void checkUrlAllowsIpInWhitelistCidr() throws Exception {
+        ConfigInfoMapper mapper = mockConfigMapper("", "127.0.0.0/8", "127.0.0.0/8");
+        UrlCheckTool tool = new UrlCheckTool(mapper);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/allowed", exchange -> {
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/allowed";
+            tool.checkUrl(url);
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
@@ -98,10 +155,16 @@ class UrlCheckToolTest {
     }
 
     private static ConfigInfoMapper mockConfigMapper(String ipBlackList, String segmentBlackList) {
+        return mockConfigMapper(ipBlackList, segmentBlackList, "");
+    }
+
+    private static ConfigInfoMapper mockConfigMapper(
+            String ipBlackList, String segmentBlackList, String ipWhiteList) {
         ConfigInfoMapper mapper = mock(ConfigInfoMapper.class);
         when(mapper.getListByCategory("IP_BLACK_LIST")).thenReturn(List.of(config(ipBlackList)));
         when(mapper.getListByCategory("NETWORK_SEGMENT_BLACK_LIST")).thenReturn(List.of(config(segmentBlackList)));
         when(mapper.getListByCategory("DOMAIN_WHITE_LIST")).thenReturn(Collections.emptyList());
+        when(mapper.getListByCategory("IP_WHITE_LIST")).thenReturn(List.of(config(ipWhiteList)));
         return mapper;
     }
 
@@ -120,7 +183,7 @@ class UrlCheckToolTest {
         }
 
         @Override
-        public String getRedirectUrl(String url) {
+        protected String getRedirectUrl(String url, List<String> ipWhiteList) {
             return redirects.getOrDefault(url, url);
         }
     }

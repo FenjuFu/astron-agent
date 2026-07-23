@@ -115,7 +115,7 @@ class ModelServiceTest {
         ModelValidationRequest req = new ModelValidationRequest();
         req.setId(100L);
         req.setApiKeyMasked(false); // Bypass decryptApiKey
-        req.setEndpoint("https://api.example.com"); // Will be appended with /v1/chat/completions
+        req.setEndpoint("https://8.8.8.8"); // Will be appended with /v1/chat/completions
         req.setDomain("gpt-4o-mini");
         req.setModelName("my-model");
         req.setUid("u1");
@@ -178,7 +178,7 @@ class ModelServiceTest {
         ModelValidationRequest req = new ModelValidationRequest();
         req.setId(101L);
         req.setApiKeyMasked(false);
-        req.setEndpoint("https://api.example.com/base");
+        req.setEndpoint("https://8.8.8.8/base");
         req.setDomain("gpt-4o");
         req.setModelName("m2");
         req.setUid("u1");
@@ -217,7 +217,7 @@ class ModelServiceTest {
         ModelValidationRequest req = new ModelValidationRequest();
         req.setId(102L);
         req.setApiKeyMasked(false);
-        req.setEndpoint("https://api.example.com"); // Will be appended with /v1/chat/completions
+        req.setEndpoint("https://8.8.8.8"); // Will be appended with /v1/chat/completions
         req.setDomain("gpt-4o");
         req.setModelName("m3");
         req.setUid("u1");
@@ -509,7 +509,7 @@ class ModelServiceTest {
         req.setId(null);
         req.setApiKeyMasked(null);
         req.setApiKey("ENCRYPTED_BASE64");
-        req.setEndpoint("https://api.example.com"); // Will be appended with /v1/chat/completions
+        req.setEndpoint("https://8.8.8.8"); // Will be appended with /v1/chat/completions
         req.setDomain("gpt-4o-mini");
         req.setModelName("my-new");
         req.setUid("u1");
@@ -649,6 +649,63 @@ class ModelServiceTest {
 
         BusinessException ex = assertThrows(BusinessException.class, () -> modelService.validateModel(req));
         assertNotNull(ex.getMessage());
+    }
+
+    @Test
+    void buildModelApiUrlAllowsIpInWhitelist() {
+        ConfigInfo blacklist = new ConfigInfo();
+        blacklist.setValue("192.168.0.0/16");
+        ConfigInfo whitelist = new ConfigInfo();
+        whitelist.setValue("192.168.60.12");
+        when(configInfoMapper.getListByCategory("NETWORK_SEGMENT_BLACK_LIST"))
+                .thenReturn(List.of(blacklist));
+        when(configInfoMapper.getListByCategory("IP_WHITE_LIST"))
+                .thenReturn(List.of(whitelist));
+
+        String url = ReflectionTestUtils.invokeMethod(
+                modelService,
+                "buildModelApiUrlNew",
+                "http://192.168.60.12:5080",
+                "openai",
+                "local-model");
+
+        assertEquals("http://192.168.60.12:5080/v1/chat/completions", url);
+    }
+
+    @Test
+    void buildModelApiUrlRejectsIpOutsideWhitelist() {
+        ConfigInfo blacklist = new ConfigInfo();
+        blacklist.setValue("192.168.0.0/16");
+        ConfigInfo whitelist = new ConfigInfo();
+        whitelist.setValue("192.168.60.12");
+        when(configInfoMapper.getListByCategory("NETWORK_SEGMENT_BLACK_LIST"))
+                .thenReturn(List.of(blacklist));
+        when(configInfoMapper.getListByCategory("IP_WHITE_LIST"))
+                .thenReturn(List.of(whitelist));
+
+        assertThrows(BusinessException.class, () -> ReflectionTestUtils.invokeMethod(
+                modelService,
+                "buildModelApiUrlNew",
+                "http://192.168.60.13:5080",
+                "openai",
+                "local-model"));
+    }
+
+    @Test
+    void buildModelApiUrlRejectsPrivateIpWhenBlacklistIsEmpty() {
+        ConfigInfo emptyConfig = new ConfigInfo();
+        emptyConfig.setValue("");
+        when(configInfoMapper.getListByCategory("NETWORK_SEGMENT_BLACK_LIST"))
+                .thenReturn(List.of(emptyConfig));
+        when(configInfoMapper.getListByCategory("IP_WHITE_LIST"))
+                .thenReturn(List.of(emptyConfig));
+
+        assertThrows(BusinessException.class, () -> ReflectionTestUtils.invokeMethod(
+                modelService,
+                "buildModelApiUrlNew",
+                "http://192.168.60.12:5080",
+                "openai",
+                "local-model"));
     }
 
     /**
