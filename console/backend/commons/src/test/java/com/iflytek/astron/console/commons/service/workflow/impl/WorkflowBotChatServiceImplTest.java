@@ -323,9 +323,8 @@ class WorkflowBotChatServiceImplTest {
 
         // When & Then
         try (MockedConstruction<WorkflowClient> mockWorkflowClient = mockConstruction(WorkflowClient.class)) {
-            BusinessException exception = assertThrows(BusinessException.class, () ->
-                    workflowBotChatService.chatWorkflowBot(
-                            chatBotReqDto, sseEmitter, sseId, workflowOperation, workflowVersion));
+            BusinessException exception = assertThrows(BusinessException.class, () -> workflowBotChatService.chatWorkflowBot(
+                    chatBotReqDto, sseEmitter, sseId, workflowOperation, workflowVersion));
 
             assertEquals(ResponseEnum.PARAMETER_ERROR, exception.getResponseEnum());
             verify(chatDataService, never()).createRequest(any());
