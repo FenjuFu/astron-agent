@@ -11,7 +11,6 @@ import { useTranslation } from 'react-i18next';
 import MessageList from './message-list';
 import { MessageListType } from '@/types/chat';
 import { getLanguageCode } from '@/utils/http';
-import { fetchEventSource } from '@microsoft/fetch-event-source';
 import eventBus from '@/utils/event-bus';
 import { baseURL } from '@/utils/http';
 import { ModelListData } from '@/services/spark-common';
@@ -22,6 +21,8 @@ import {
 import type { AgentSkill } from '@/types/skill';
 import type { AgentTool } from '@/types/plugin-store';
 import type { AgentWorkflow } from '@/types/agent-workflow';
+import useSpaceStore from '@/store/space-store';
+import { fetchSseWithContext } from '@/utils/sse-request';
 
 // PromptTry组件暴露的方法接口
 export interface PromptTryRef {
@@ -267,10 +268,6 @@ const PromptTry = forwardRef<
       let toolsName: string = ''; //工具名称
       const controller = new AbortController();
       controllerRef.current = controller;
-      const headerConfig = {
-        'Accept-Language': getLanguageCode(),
-        authorization: `Bearer ${localStorage.getItem('accessToken')}`,
-      };
       setIsLoading(true);
       setIsCompleted(false);
       // 先追加用户消息
@@ -294,10 +291,19 @@ const PromptTry = forwardRef<
         },
       ]);
 
-      fetchEventSource(esURL, {
+      fetchSseWithContext(esURL, {
+        getContext: () => {
+          const { spaceId, spaceType, enterpriseId } = useSpaceStore.getState();
+          return {
+            languageCode: getLanguageCode(),
+            accessToken: localStorage.getItem('accessToken'),
+            spaceId,
+            spaceType,
+            enterpriseId,
+          };
+        },
         method: 'POST',
         body: form,
-        headers: { ...headerConfig },
         openWhenHidden: true,
         signal: controller.signal,
         onopen(): Promise<void> {
