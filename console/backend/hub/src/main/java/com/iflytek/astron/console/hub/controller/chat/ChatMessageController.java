@@ -1,6 +1,7 @@
 package com.iflytek.astron.console.hub.controller.chat;
 
 import cn.hutool.core.util.RandomUtil;
+import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson2.JSON;
 import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.entity.bot.ChatBotBase;
@@ -82,6 +83,12 @@ public class ChatMessageController {
 
         log.info("Establishing SSE connection, sseId: {}, chatId: {}", sseId, chatId);
 
+        // Validate before any conversation lookup so invalid input has no downstream side effects.
+        ValidationResult validation = validateChatRequest(chatId, text, sseId, sseEmitter);
+        if (!validation.isValid()) {
+            return sseEmitter;
+        }
+
         // Get the latest chat_id
         List<ChatTreeIndex> chatTreeIndexList = chatListDataService.findChatTreeIndexByChatIdOrderById(chatId);
         if (chatTreeIndexList.isEmpty()) {
@@ -92,9 +99,9 @@ public class ChatMessageController {
         }
         Long lastChatId = chatTreeIndexList.getFirst().getChildChatId();
 
-        // Validate request parameters
-        ValidationResult validation = validateChatRequest(lastChatId, text, sseId, sseEmitter);
-        if (!validation.isValid()) {
+        // Preserve validation of the resolved child ID in case stored tree data is incomplete.
+        ValidationResult resolvedChatValidation = validateChatRequest(lastChatId, text, sseId, sseEmitter);
+        if (!resolvedChatValidation.isValid()) {
             return sseEmitter;
         }
 
@@ -124,7 +131,7 @@ public class ChatMessageController {
             return ValidationResult.invalid();
         }
 
-        if (StringUtils.isBlank(text)) {
+        if (StrUtil.isBlank(text)) {
             log.warn("Chat content is empty, sseId: {}, chatId: {}", sseId, chatId);
             SseEmitterUtil.sendError(sseEmitter, "Please enter chat content");
             SseEmitterUtil.sendEndAndComplete(sseEmitter);

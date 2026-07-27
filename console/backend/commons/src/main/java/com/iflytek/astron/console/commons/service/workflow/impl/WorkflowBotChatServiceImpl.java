@@ -107,6 +107,12 @@ public class WorkflowBotChatServiceImpl implements WorkflowBotChatService {
         String url = chatBotReqDto.getUrl();
         Integer botId = chatBotReqDto.getBotId();
 
+        if (StrUtil.isBlank(ask)) {
+            log.warn("Rejecting workflow chat request with empty user input, uid: {}, chatId: {}, botId: {}",
+                    uid, chatId, botId);
+            throw new BusinessException(ResponseEnum.PARAMETER_ERROR);
+        }
+
         JSONObject inputs = new JSONObject();
         inputs.put("AGENT_USER_INPUT", ask);
 
@@ -210,26 +216,35 @@ public class WorkflowBotChatServiceImpl implements WorkflowBotChatService {
         LinkedList<ChatRequestDto> filteredMessages = new LinkedList<>();
         boolean removeNext = false;
         for (ChatRequestDto dto : requestDtoList.getMessages()) {
+            if (removeNext) {
+                removeNext = false;
+                continue;
+            }
+
             Object content = dto.getContent();
             if (content instanceof List<?> list) {
+                boolean textFound = false;
                 // Type-safe iteration without unchecked cast
                 for (Object item : list) {
-                    if (item instanceof ChatModelMeta itemJson) {
-                        String type = itemJson.getType();
-                        if ("text".equals(type)) {
-                            ChatRequestDto filteredDto = new ChatRequestDto();
-                            filteredDto.setRole(dto.getRole());
-                            filteredDto.setContent(itemJson.getText());
-                            filteredDto.setContent_type(dto.getContent_type());
-                            filteredMessages.add(filteredDto);
-                            break;
-                        }
+                    if (item instanceof ChatModelMeta itemJson
+                            && "text".equals(itemJson.getType())
+                            && StrUtil.isNotBlank(itemJson.getText())) {
+                        ChatRequestDto filteredDto = new ChatRequestDto();
+                        filteredDto.setRole(dto.getRole());
+                        filteredDto.setContent(itemJson.getText());
+                        filteredDto.setContent_type(dto.getContent_type());
+                        filteredMessages.add(filteredDto);
+                        textFound = true;
+                        break;
                     }
+                }
+                if (!textFound && "user".equals(dto.getRole())) {
+                    removeNext = true;
                 }
             } else {
                 // Determine if this item should be removed when passed to large model
                 boolean remove = shouldRemove(content);
-                if (!removeNext && !remove) {
+                if (!remove) {
                     // Non-list type, keep directly
                     filteredMessages.add(dto);
                 }

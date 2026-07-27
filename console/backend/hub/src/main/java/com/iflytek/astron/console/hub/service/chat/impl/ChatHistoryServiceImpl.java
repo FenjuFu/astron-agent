@@ -1,5 +1,6 @@
 package com.iflytek.astron.console.hub.service.chat.impl;
 
+import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson2.JSONObject;
 import com.iflytek.astron.console.commons.dto.chat.*;
 import com.iflytek.astron.console.commons.dto.llm.SparkChatRequest;
@@ -108,6 +109,7 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
         List<ChatRespModelDto> respList = chatDataService.getChatRespModelBotHistoryByChatId(uid, chatId, reqIdList);
         ChatRequestDtoList chatRecordList = new ChatRequestDtoList();
         int tempLength = 0;
+        int skippedInvalidRounds = 0;
 
         // Group answer history by reqId
         Map<Long, ChatRespModelDto> respMap = new HashMap<>();
@@ -124,6 +126,11 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
 
             // Skip if no response found for this request
             if (respDto == null) {
+                continue;
+            }
+
+            if (StrUtil.isBlank(reqDto.getMessage()) && !hasUsableFileUrl(reqDto.getUrl())) {
+                skippedInvalidRounds++;
                 continue;
             }
 
@@ -156,23 +163,25 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
             // Historical length concatenation
             tempLength = tempLength + answerLength;
             if (tempLength > MAX_HISTORY_NUMBERS) {
+                logSkippedInvalidRounds(chatId, skippedInvalidRounds);
                 return chatRecordList;
             }
             /*** Add question ***/
             String ask = reqDto.getMessage();
             int askLength = ask == null ? 0 : ask.length();
             // If the question is an image, set length to 800 to prevent history from exceeding 10 images
-            if (StringUtils.isNotBlank(reqDto.getUrl())) {
+            if (hasUsableFileUrl(reqDto.getUrl())) {
                 askLength = 800;
             }
             tempLength = tempLength + askLength;
             if (tempLength > MAX_HISTORY_NUMBERS) {
+                logSkippedInvalidRounds(chatId, skippedInvalidRounds);
                 return chatRecordList;
             }
 
             // If there is data in multimodal content, it means this is multimodal input, append history in
             // multimodal design QQA format
-            if (StringUtils.isNotBlank(reqDto.getUrl())) {
+            if (hasUsableFileUrl(reqDto.getUrl())) {
                 String url = reqDto.getUrl();
                 List<ChatModelMeta> metaList = urlToArray(url, ask);
                 chatRecordList.getMessages().addFirst(new ChatRequestDto("user", metaList));
@@ -180,6 +189,7 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
                 chatRecordList.getMessages().addFirst(new ChatRequestDto("user", ask));
             }
         }
+        logSkippedInvalidRounds(chatId, skippedInvalidRounds);
         chatRecordList.setLength(tempLength);
         return chatRecordList;
     }
@@ -191,17 +201,17 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
     public List<ChatModelMeta> urlToArray(String url, String ask) {
         List<ChatModelMeta> metaList = new ArrayList<>();
         // Image address concatenation
-        if (StringUtils.isNotBlank(url)) {
+        if (hasUsableFileUrl(url)) {
             String[] urls = url.split(",");
             // Assemble images
             for (String tempUrl : urls) {
                 // Skip if image address is empty
-                if (StringUtils.isBlank(tempUrl) || "null".equals(tempUrl)) {
+                if (!isUsableFileUrl(tempUrl)) {
                     continue;
                 }
                 ChatModelMeta meta = new ChatModelMeta();
                 JSONObject jb = new JSONObject();
-                jb.put("url", Base64Util.encode(tempUrl));
+                jb.put("url", Base64Util.encode(tempUrl.trim()));
                 meta.setType("image_url");
                 meta.setImage_url(jb);
                 metaList.add(meta);
@@ -209,13 +219,31 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
         }
 
         // Text must be placed at the end of the array
-        if (StringUtils.isNotBlank(ask)) {
+        if (StrUtil.isNotBlank(ask)) {
             ChatModelMeta meta = new ChatModelMeta();
             meta.setType("text");
             meta.setText(ask);
             metaList.add(meta);
         }
         return metaList;
+    }
+
+    private boolean hasUsableFileUrl(String url) {
+        if (StrUtil.isBlank(url)) {
+            return false;
+        }
+        return Arrays.stream(url.split(",")).anyMatch(this::isUsableFileUrl);
+    }
+
+    private boolean isUsableFileUrl(String url) {
+        return StrUtil.isNotBlank(url) && !"null".equalsIgnoreCase(url.trim());
+    }
+
+    private void logSkippedInvalidRounds(Long chatId, int skippedInvalidRounds) {
+        if (skippedInvalidRounds > 0) {
+            log.warn("Skipped {} invalid chat history round(s) with empty user content, chatId: {}",
+                    skippedInvalidRounds, chatId);
+        }
     }
 
     /**
