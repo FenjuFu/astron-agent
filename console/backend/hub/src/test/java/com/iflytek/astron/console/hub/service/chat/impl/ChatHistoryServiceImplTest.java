@@ -13,6 +13,9 @@ import org.apache.logging.log4j.util.Base64Util;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
@@ -227,6 +230,104 @@ class ChatHistoryServiceImplTest {
         assertTrue(result.getLength() > 0);
 
         verify(chatDataService).getChatRespModelBotHistoryByChatId(uid, chatId, reqIds);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t", "\u00A0", "\uFEFF", "\u3000"})
+    void testGetHistory_WithFailedBlankRequest_ShouldSkipOnlyInvalidRound(String invalidMessage) {
+        // Given
+        ChatReqModelDto currentRequest = new ChatReqModelDto();
+        currentRequest.setId(3L);
+        currentRequest.setMessage("Follow-up question");
+
+        ChatReqModelDto failedRequest = new ChatReqModelDto();
+        failedRequest.setId(2L);
+        failedRequest.setMessage(invalidMessage);
+
+        ChatReqModelDto completedRequest = new ChatReqModelDto();
+        completedRequest.setId(1L);
+        completedRequest.setMessage("Earlier question");
+
+        ChatRespModelDto failedResponse = new ChatRespModelDto();
+        failedResponse.setReqId(2L);
+        failedResponse.setMessage("x".repeat(ChatHistoryServiceImpl.MAX_HISTORY_NUMBERS + 1));
+
+        ChatRespModelDto completedResponse = new ChatRespModelDto();
+        completedResponse.setReqId(1L);
+        completedResponse.setMessage("Earlier answer");
+
+        List<ChatReqModelDto> requests = Arrays.asList(currentRequest, failedRequest, completedRequest);
+        List<Long> requestIds = Arrays.asList(3L, 2L, 1L);
+        when(chatDataService.getChatRespModelBotHistoryByChatId(uid, chatId, requestIds))
+                .thenReturn(Arrays.asList(failedResponse, completedResponse));
+
+        // When
+        ChatRequestDtoList result = chatHistoryService.getHistory(uid, chatId, requests);
+
+        // Then
+        assertEquals(2, result.getMessages().size());
+        assertEquals("user", result.getMessages().get(0).getRole());
+        assertEquals("Earlier question", result.getMessages().get(0).getContent());
+        assertEquals("assistant", result.getMessages().get(1).getRole());
+        assertEquals("Earlier answer", result.getMessages().get(1).getContent());
+        assertEquals(completedRequest.getMessage().length() + completedResponse.getMessage().length(),
+                result.getLength());
+    }
+
+    @Test
+    void testGetHistory_WithOnlyInvalidFileUrls_ShouldSkipInvalidRound() {
+        ChatReqModelDto failedRequest = new ChatReqModelDto();
+        failedRequest.setId(2L);
+        failedRequest.setMessage(null);
+        failedRequest.setUrl("null, NULL , ,\t,\u00A0,\uFEFF,null");
+
+        ChatReqModelDto completedRequest = new ChatReqModelDto();
+        completedRequest.setId(1L);
+        completedRequest.setMessage("Earlier question");
+
+        ChatRespModelDto failedResponse = new ChatRespModelDto();
+        failedResponse.setReqId(2L);
+        failedResponse.setMessage("x".repeat(ChatHistoryServiceImpl.MAX_HISTORY_NUMBERS + 1));
+
+        ChatRespModelDto completedResponse = new ChatRespModelDto();
+        completedResponse.setReqId(1L);
+        completedResponse.setMessage("Earlier answer");
+
+        List<ChatReqModelDto> requests = Arrays.asList(failedRequest, completedRequest);
+        when(chatDataService.getChatRespModelBotHistoryByChatId(uid, chatId, Arrays.asList(2L, 1L)))
+                .thenReturn(Arrays.asList(failedResponse, completedResponse));
+
+        ChatRequestDtoList result = chatHistoryService.getHistory(uid, chatId, requests);
+
+        assertEquals(2, result.getMessages().size());
+        assertEquals("Earlier question", result.getMessages().get(0).getContent());
+        assertEquals("Earlier answer", result.getMessages().get(1).getContent());
+        assertEquals(completedRequest.getMessage().length() + completedResponse.getMessage().length(),
+                result.getLength());
+    }
+
+    @Test
+    void testGetHistory_WithFileOnlyRequest_ShouldKeepRound() {
+        ChatReqModelDto fileRequest = new ChatReqModelDto();
+        fileRequest.setId(1L);
+        fileRequest.setMessage(null);
+        fileRequest.setUrl("http://example.com/image.jpg");
+
+        ChatRespModelDto response = new ChatRespModelDto();
+        response.setReqId(1L);
+        response.setMessage("Image answer");
+
+        when(chatDataService.getChatRespModelBotHistoryByChatId(uid, chatId, Arrays.asList(1L)))
+                .thenReturn(Arrays.asList(response));
+
+        ChatRequestDtoList result = chatHistoryService.getHistory(uid, chatId, Arrays.asList(fileRequest));
+
+        assertEquals(2, result.getMessages().size());
+        assertEquals("user", result.getMessages().get(0).getRole());
+        assertInstanceOf(List.class, result.getMessages().get(0).getContent());
+        assertEquals("assistant", result.getMessages().get(1).getRole());
+        assertEquals("Image answer", result.getMessages().get(1).getContent());
     }
 
     @Test

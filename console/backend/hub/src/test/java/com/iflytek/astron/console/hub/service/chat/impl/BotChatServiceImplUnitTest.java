@@ -18,6 +18,7 @@ import com.iflytek.astron.console.commons.service.data.ChatHistoryService;
 import com.iflytek.astron.console.commons.service.data.ChatListDataService;
 import com.iflytek.astron.console.commons.service.data.UserLangChainDataService;
 import com.iflytek.astron.console.commons.service.workflow.WorkflowBotChatService;
+import com.iflytek.astron.console.commons.util.SseEmitterUtil;
 import com.iflytek.astron.console.commons.util.space.SpaceInfoUtil;
 import com.iflytek.astron.console.hub.data.ReqKnowledgeRecordsDataService;
 import com.iflytek.astron.console.hub.service.agentmemory.runtime.AgentMemoryRuntimeService;
@@ -33,6 +34,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -121,6 +125,23 @@ class BotChatServiceImplUnitTest {
 
         verify(workflowBotChatService).chatWorkflowBot(eq(chatBotReqDto), eq(sseEmitter), eq("sse"), eq("op"), eq("v1"));
         verify(springAiAgentChatService, never()).chat(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t", "\u00A0", "\uFEFF", "\u3000"})
+    void testChatMessageBot_BlankQuestion_DoesNotQueryOrInvokeServices(String ask) {
+        ChatBotReqDto chatBotReqDto = createChatBotReqDto();
+        chatBotReqDto.setAsk(ask);
+        SseEmitter sseEmitter = new SseEmitter();
+
+        try (MockedStatic<SseEmitterUtil> sse = mockStatic(SseEmitterUtil.class)) {
+            botChatService.chatMessageBot(chatBotReqDto, sseEmitter, "sse", null, null);
+
+            verifyNoInteractions(chatBotDataService, chatDataService, workflowService,
+                    workflowBotChatService, springAiAgentChatService);
+            sse.verify(() -> SseEmitterUtil.completeWithError(sseEmitter, "Please enter chat content"));
+        }
     }
 
     @Test

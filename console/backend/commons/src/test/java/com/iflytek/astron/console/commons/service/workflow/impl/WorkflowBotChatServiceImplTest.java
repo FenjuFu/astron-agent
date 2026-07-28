@@ -1,6 +1,8 @@
 package com.iflytek.astron.console.commons.service.workflow.impl;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.dto.chat.ChatModelMeta;
 import com.iflytek.astron.console.commons.dto.chat.ChatReqModelDto;
@@ -26,6 +28,9 @@ import okio.Buffer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RBucket;
@@ -307,6 +312,76 @@ class WorkflowBotChatServiceImplTest {
         assertEquals(ResponseEnum.BOT_CHAIN_SUBMIT_ERROR, exception.getResponseEnum());
         verify(userLangChainDataService).findOneByBotId(456);
         verifyNoInteractions(chatDataService);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t", "\u00A0", "\uFEFF", "\u3000"})
+    void testChatWorkflowBot_WithBlankQuestion_ShouldRejectBeforePersistence(String ask) {
+        // Given
+        chatBotReqDto.setAsk(ask);
+
+        // When & Then
+        try (MockedConstruction<WorkflowClient> mockWorkflowClient = mockConstruction(WorkflowClient.class)) {
+            BusinessException exception = assertThrows(BusinessException.class, () -> workflowBotChatService.chatWorkflowBot(
+                    chatBotReqDto, sseEmitter, sseId, workflowOperation, workflowVersion));
+
+            assertEquals(ResponseEnum.PARAMETER_ERROR, exception.getResponseEnum());
+            verify(chatDataService, never()).createRequest(any());
+            assertTrue(mockWorkflowClient.constructed().isEmpty());
+        }
+    }
+
+    @Test
+    void testChatWorkflowBot_WithFileOnlyHistory_ShouldOmitWholeRoundFromRequest() throws Exception {
+        when(userLangChainDataService.findOneByBotId(456)).thenReturn(userLangChainInfo);
+        when(chatDataService.createRequest(any(ChatReqRecords.class))).thenReturn(chatReqRecords);
+        when(workflowBotParamService.handleMultiFileParam(
+                anyString(), anyLong(), isNull(), any(), any(), anyLong())).thenReturn(false);
+
+        List<ChatReqModelDto> reqList = new ArrayList<>();
+        when(chatDataService.getReqModelBotHistoryByChatId("testUser", 123L)).thenReturn(reqList);
+
+        ChatModelMeta imageMeta = new ChatModelMeta();
+        imageMeta.setType("image_url");
+        JSONObject imageUrl = new JSONObject();
+        imageUrl.put("url", "encoded-image-url");
+        imageMeta.setImage_url(imageUrl);
+        ChatRequestDto<List<ChatModelMeta>> fileOnlyUser = new ChatRequestDto<>(
+                "user", List.of(imageMeta));
+        ChatRequestDto<String> orphanedAnswer = new ChatRequestDto<>("assistant", "Image answer");
+        ChatRequestDto<String> earlierUser = new ChatRequestDto<>("user", "Earlier question");
+        ChatRequestDto<String> earlierAssistant = new ChatRequestDto<>("assistant", "Earlier answer");
+        ChatRequestDto<String> laterUser = new ChatRequestDto<>("user", "Later question");
+        ChatRequestDto<String> laterAssistant = new ChatRequestDto<>("assistant", "Later answer");
+        ChatRequestDtoList requestDtoList = new ChatRequestDtoList();
+        requestDtoList.setMessages(new LinkedList<>(List.of(
+                earlierUser, earlierAssistant, fileOnlyUser, orphanedAnswer, laterUser, laterAssistant)));
+        when(chatHistoryService.getHistory("testUser", 123L, reqList)).thenReturn(requestDtoList);
+        when(chatBotDataService.findMarketBotByBotId(456)).thenReturn(null);
+
+        List<List<?>> constructorArgs = new ArrayList<>();
+        try (MockedConstruction<WorkflowClient> mockWorkflowClient = mockConstruction(
+                WorkflowClient.class,
+                (mock, context) -> constructorArgs.add(context.arguments()))) {
+            workflowBotChatService.chatWorkflowBot(
+                    chatBotReqDto, sseEmitter, sseId, workflowOperation, workflowVersion);
+
+            assertEquals(1, mockWorkflowClient.constructed().size());
+            RequestBody requestBody = (RequestBody) constructorArgs.get(0).get(4);
+            Buffer buffer = new Buffer();
+            requestBody.writeTo(buffer);
+            JSONArray history = JSON.parseObject(buffer.readUtf8()).getJSONArray("history");
+            assertEquals(4, history.size());
+            assertEquals("user", history.getJSONObject(0).getString("role"));
+            assertEquals("Earlier question", history.getJSONObject(0).getString("content"));
+            assertEquals("assistant", history.getJSONObject(1).getString("role"));
+            assertEquals("Earlier answer", history.getJSONObject(1).getString("content"));
+            assertEquals("user", history.getJSONObject(2).getString("role"));
+            assertEquals("Later question", history.getJSONObject(2).getString("content"));
+            assertEquals("assistant", history.getJSONObject(3).getString("role"));
+            assertEquals("Later answer", history.getJSONObject(3).getString("content"));
+        }
     }
 
     @Test

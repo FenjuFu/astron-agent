@@ -1,6 +1,7 @@
 package com.iflytek.astron.console.hub.service.chat.impl;
 
 import cn.hutool.core.collection.CollectionUtil;
+import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -127,6 +128,13 @@ public class BotChatServiceImpl implements BotChatService {
     @Override
     public void chatMessageBot(ChatBotReqDto chatBotReqDto, SseEmitter sseEmitter, String sseId, String workflowOperation, String workflowVersion) {
         try {
+            if (StrUtil.isBlank(chatBotReqDto.getAsk())) {
+                log.warn("Rejecting chat request with empty user input, sseId: {}, chatId: {}, uid: {}",
+                        sseId, chatBotReqDto.getChatId(), chatBotReqDto.getUid());
+                SseEmitterUtil.completeWithError(sseEmitter, "Please enter chat content");
+                return;
+            }
+
             log.info("Processing chat request, sseId: {}, chatId: {}, uid: {}", sseId, chatBotReqDto.getChatId(), chatBotReqDto.getUid());
             Long spaceId = SpaceInfoUtil.getSpaceId();
 
