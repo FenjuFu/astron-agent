@@ -4474,6 +4474,9 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         Workflow sourceFlow = this.getOne(new LambdaQueryWrapper<Workflow>().eq(Workflow::getFlowId, sourceFlowId));
         Workflow targetFlow = this.getOne(new LambdaQueryWrapper<Workflow>().eq(Workflow::getFlowId, targetFlowId));
         if (sourceFlow != null && targetFlow != null) {
+            Long spaceId = SpaceInfoUtil.getSpaceId();
+            dataPermissionCheckTool.checkWorkflowVisible(sourceFlow, spaceId);
+            assertWorkflowBelongsToCurrentContext(targetFlow, spaceId);
             log.info("Start copying flow, sourceFlowId{}, targetFlowId{}, targetFlow source data {}", sourceFlowId, targetFlowId, targetFlow.getData());
             targetFlow.setData(sourceFlow.getData());
             targetFlow.setUpdateTime(new Date());
