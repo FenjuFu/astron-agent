@@ -97,3 +97,6 @@ class WorkflowServiceCopyFlowPermissionTest {
         workflow.setFlowId(flowId);
         workflow.setSpaceId(spaceId);
         workflow.setData(data);
+        return workflow;
+    }
+}
