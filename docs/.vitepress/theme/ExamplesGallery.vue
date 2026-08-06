@@ -32,6 +32,11 @@ const t = computed(() =>
 const categories = computed(() => [...new Set(examples.map((e) => e.category))].sort());
 const active = ref<string>("all");
 const filtered = computed(() => (active.value === "all" ? examples : examples.filter((e) => e.category === active.value)));
+const failedPreviews = ref(new Set<string>());
+
+const hideBrokenPreview = (id: string): void => {
+  failedPreviews.value = new Set(failedPreviews.value).add(id);
+};
 
 const contributeHref = computed(() => (isZh.value ? "/zh/contribute-to-docs" : "/contribute-to-docs"));
 </script>
@@ -62,6 +67,14 @@ const contributeHref = computed(() => (isZh.value ? "/zh/contribute-to-docs" : "
 
     <div v-else class="exg__grid">
       <article v-for="e in filtered" :key="e.id" class="exg__card">
+        <img
+          v-if="e.hasPreview && !failedPreviews.has(e.id)"
+          class="exg__preview"
+          :src="e.previewUrl"
+          :alt="`${e.title} workflow preview`"
+          loading="lazy"
+          @error="hideBrokenPreview(e.id)"
+        />
         <div class="exg__card-top">
           <span class="exg__cat">{{ e.category }}</span>
           <span v-if="e.event" class="exg__event">{{ e.event }}</span>
@@ -142,6 +155,15 @@ const contributeHref = computed(() => (isZh.value ? "/zh/contribute-to-docs" : "
 .exg__card:hover {
   border-color: var(--vp-c-brand-1);
   transform: translateY(-2px);
+}
+.exg__preview {
+  width: calc(100% + 36px);
+  aspect-ratio: 3 / 2;
+  margin: -18px -18px 16px;
+  border-radius: 11px 11px 0 0;
+  border-bottom: 1px solid var(--vp-c-divider);
+  object-fit: cover;
+  background: var(--vp-c-bg);
 }
 .exg__card-top {
   display: flex;
