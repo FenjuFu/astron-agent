@@ -60,7 +60,8 @@ class WorkflowServiceCopyFlowPermissionTest {
         Workflow target = workflow("target", 100L, "target-data");
         doReturn(source, target).when(workflowService).getOne(any(Wrapper.class));
         doThrow(new BusinessException(ResponseEnum.INSUFFICIENT_PERMISSIONS))
-                .when(dataPermissionCheckTool).checkWorkflowVisible(source, 100L);
+                .when(dataPermissionCheckTool)
+                .checkWorkflowVisible(source, 100L);
 
         try (MockedStatic<SpaceInfoUtil> space = org.mockito.Mockito.mockStatic(SpaceInfoUtil.class)) {
             space.when(SpaceInfoUtil::getSpaceId).thenReturn(100L);
