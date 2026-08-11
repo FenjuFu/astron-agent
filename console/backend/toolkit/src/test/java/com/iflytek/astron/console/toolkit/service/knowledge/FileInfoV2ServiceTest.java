@@ -2269,7 +2269,6 @@ class FileInfoV2ServiceTest {
             when(configInfoService.getOnly(any(LambdaQueryWrapper.class))).thenReturn(null);
             when(extractKnowledgeTaskService.save(any(ExtractKnowledgeTask.class))).thenReturn(true);
             doNothing().when(knowledgeService).knowledgeExtractAsync(anyString(), anyString(), any(SliceConfig.class), any(FileInfoV2.class), any(ExtractKnowledgeTask.class));
-            doReturn(true).when(fileInfoV2Service).updateById(any(FileInfoV2.class));
 
             // When
             DealFileResult result = fileInfoV2Service.sliceFile(fileId, sliceConfig, backEmbedding);
@@ -2280,6 +2279,44 @@ class FileInfoV2ServiceTest {
             assertThat(result.getTaskId()).isEqualTo(mockFileInfo.getUuid());
             verify(extractKnowledgeTaskService, times(1)).save(any(ExtractKnowledgeTask.class));
             verify(knowledgeService, times(1)).knowledgeExtractAsync(anyString(), anyString(), any(SliceConfig.class), any(FileInfoV2.class), any(ExtractKnowledgeTask.class));
+        }
+
+        /**
+         * A fast async worker may commit a terminal state before sliceFile returns. The dispatcher must
+         * never overwrite that state with FILE_PARSE_DOING.
+         */
+        @Test
+        @DisplayName("Slice file - fast async completion does not regress status")
+        void testSliceFile_FastAsyncCompletionDoesNotRegressStatus() {
+            Long fileId = 1L;
+            SliceConfig sliceConfig = new SliceConfig();
+            sliceConfig.setType(1);
+
+            mockFileInfo.setType("txt");
+            mockFileInfo.setAddress("s3://bucket/test.txt");
+            mockFileInfo.setSource("AIUI-RAG2");
+            mockFileInfo.setStatus(ProjectContent.FILE_PARSE_DOING);
+
+            ReflectionTestUtils.setField(fileInfoV2Service, "extractKnowledgeTaskService", extractKnowledgeTaskService);
+            ReflectionTestUtils.setField(fileInfoV2Service, "configInfoService", configInfoService);
+
+            when(fileInfoV2Mapper.selectById(fileId)).thenReturn(mockFileInfo);
+            when(configInfoService.getOnly(any(LambdaQueryWrapper.class))).thenReturn(null);
+            when(extractKnowledgeTaskService.save(any(ExtractKnowledgeTask.class))).thenReturn(true);
+            doAnswer(invocation -> {
+                FileInfoV2 asyncFile = invocation.getArgument(3);
+                asyncFile.setStatus(ProjectContent.FILE_PARSE_SUCCESSED);
+                return null;
+            }).when(knowledgeService)
+                    .knowledgeExtractAsync(
+                            anyString(), anyString(), any(SliceConfig.class),
+                            any(FileInfoV2.class), any(ExtractKnowledgeTask.class));
+
+            DealFileResult result = fileInfoV2Service.sliceFile(fileId, sliceConfig, 0);
+
+            assertThat(result.isParseSuccess()).isTrue();
+            assertThat(mockFileInfo.getStatus()).isEqualTo(ProjectContent.FILE_PARSE_SUCCESSED);
+            verify(fileInfoV2Service, never()).updateById(any(FileInfoV2.class));
         }
 
         /**
@@ -2304,6 +2341,67 @@ class FileInfoV2ServiceTest {
         }
 
         /**
+         * Missing storage metadata must close a previously scheduled file as a terminal failure instead of
+         * throwing before the async guard and leaving status 0.
+         */
+        @Test
+        @DisplayName("Slice file - missing address closes parse status")
+        void testSliceFile_MissingAddressClosesParseStatus() {
+            Long fileId = 1L;
+            SliceConfig sliceConfig = new SliceConfig();
+            sliceConfig.setType(1);
+
+            mockFileInfo.setType("docx");
+            mockFileInfo.setAddress(null);
+            mockFileInfo.setSource("CBG-RAG");
+            mockFileInfo.setStatus(ProjectContent.FILE_PARSE_DOING);
+
+            ReflectionTestUtils.setField(fileInfoV2Service, "configInfoService", configInfoService);
+
+            when(fileInfoV2Mapper.selectById(fileId)).thenReturn(mockFileInfo);
+            when(configInfoService.getOnly(any(LambdaQueryWrapper.class))).thenReturn(null);
+            doReturn(true).when(fileInfoV2Service).updateById(any(FileInfoV2.class));
+
+            DealFileResult result = fileInfoV2Service.sliceFile(fileId, sliceConfig, 0);
+
+            assertThat(result.isParseSuccess()).isFalse();
+            assertThat(mockFileInfo.getStatus()).isEqualTo(ProjectContent.FILE_PARSE_FAILED);
+            assertThat(mockFileInfo.getReason()).contains("File address is empty");
+            verify(knowledgeService, never()).knowledgeExtractAsync(
+                    anyString(), anyString(), any(SliceConfig.class),
+                    any(FileInfoV2.class), any(ExtractKnowledgeTask.class));
+            verify(fileInfoV2Service, times(1)).updateById(mockFileInfo);
+        }
+
+        @Test
+        @DisplayName("Slice file - missing type closes parse status")
+        void testSliceFile_MissingTypeClosesParseStatus() {
+            Long fileId = 1L;
+            SliceConfig sliceConfig = new SliceConfig();
+            sliceConfig.setType(1);
+
+            mockFileInfo.setType(null);
+            mockFileInfo.setSource("CBG-RAG");
+            mockFileInfo.setStatus(ProjectContent.FILE_PARSE_DOING);
+
+            ReflectionTestUtils.setField(fileInfoV2Service, "configInfoService", configInfoService);
+
+            when(fileInfoV2Mapper.selectById(fileId)).thenReturn(mockFileInfo);
+            when(configInfoService.getOnly(any(LambdaQueryWrapper.class))).thenReturn(null);
+            doReturn(true).when(fileInfoV2Service).updateById(any(FileInfoV2.class));
+
+            DealFileResult result = fileInfoV2Service.sliceFile(fileId, sliceConfig, 0);
+
+            assertThat(result.isParseSuccess()).isFalse();
+            assertThat(mockFileInfo.getStatus()).isEqualTo(ProjectContent.FILE_PARSE_FAILED);
+            assertThat(mockFileInfo.getReason()).contains("File type is empty");
+            verify(knowledgeService, never()).knowledgeExtractAsync(
+                    anyString(), anyString(), any(SliceConfig.class),
+                    any(FileInfoV2.class), any(ExtractKnowledgeTask.class));
+            verify(fileInfoV2Service, times(1)).updateById(mockFileInfo);
+        }
+
+        /**
          * Test sliceFile - CBG-RAG with unsupported file type.
          */
         @Test
@@ -2321,6 +2419,7 @@ class FileInfoV2ServiceTest {
 
             when(fileInfoV2Mapper.selectById(fileId)).thenReturn(mockFileInfo);
             when(configInfoService.getOnly(any(LambdaQueryWrapper.class))).thenReturn(null);
+            doReturn(true).when(fileInfoV2Service).updateById(any(FileInfoV2.class));
 
             // When
             DealFileResult result = fileInfoV2Service.sliceFile(fileId, sliceConfig, backEmbedding);
@@ -2328,6 +2427,12 @@ class FileInfoV2ServiceTest {
             // Then
             assertThat(result).isNotNull();
             assertThat(result.isParseSuccess()).isFalse();
+            assertThat(mockFileInfo.getStatus()).isEqualTo(ProjectContent.FILE_PARSE_FAILED);
+            assertThat(mockFileInfo.getReason()).contains("Unsupported file type: xyz");
+            verify(knowledgeService, never()).knowledgeExtractAsync(
+                    anyString(), anyString(), any(SliceConfig.class),
+                    any(FileInfoV2.class), any(ExtractKnowledgeTask.class));
+            verify(fileInfoV2Service, times(1)).updateById(mockFileInfo);
         }
 
         /**
@@ -2689,7 +2794,7 @@ class FileInfoV2ServiceTest {
             SliceConfig sliceConfig = new SliceConfig();
             sliceConfig.setType(1);
             sliceConfig.setLengthRange(Arrays.asList(100, 500));
-            sliceConfig.setSeperator(Arrays.asList("。", "！", "？"));
+            sliceConfig.setSeperator(Collections.emptyList());
             dealFileVO.setSliceConfig(sliceConfig);
 
             mockFileInfo.setStatus(ProjectContent.FILE_PARSE_SUCCESSED);
@@ -2722,7 +2827,57 @@ class FileInfoV2ServiceTest {
             // Then
             assertThat(result).isNotNull();
             assertThat(result.getData()).isTrue();
+            assertThat(sliceConfig.getSeperator()).containsExactly("\n");
             verify(fileInfoV2Mapper, atLeastOnce()).listByIds(anyList());
+        }
+
+        @Test
+        @DisplayName("Slice files - null slice config returns parameter error")
+        void testSliceFiles_NullSliceConfig() {
+            DealFileVO dealFileVO = new DealFileVO();
+            dealFileVO.setFileIds(Collections.singletonList("1"));
+            dealFileVO.setTag("Ragflow-RAG");
+
+            assertThatThrownBy(() -> fileInfoV2Service.sliceFiles(dealFileVO))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting("responseEnum")
+                    .isEqualTo(ResponseEnum.PARAMETER_ERROR);
+            verify(fileInfoV2Mapper, never()).listByIds(anyList());
+        }
+
+        @Test
+        @DisplayName("Slice files - incomplete length range returns parameter error")
+        void testSliceFiles_IncompleteLengthRange() {
+            DealFileVO dealFileVO = new DealFileVO();
+            dealFileVO.setFileIds(Collections.singletonList("1"));
+            dealFileVO.setTag("Ragflow-RAG");
+            SliceConfig sliceConfig = new SliceConfig();
+            sliceConfig.setType(1);
+            sliceConfig.setLengthRange(Collections.singletonList(256));
+            dealFileVO.setSliceConfig(sliceConfig);
+
+            assertThatThrownBy(() -> fileInfoV2Service.sliceFiles(dealFileVO))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting("responseEnum")
+                    .isEqualTo(ResponseEnum.PARAMETER_ERROR);
+            verify(fileInfoV2Mapper, never()).listByIds(anyList());
+        }
+
+        @Test
+        @DisplayName("Slice files - default Spark slicing accepts omitted range")
+        void testSliceFiles_DefaultSparkSliceWithoutRange() throws Exception {
+            DealFileVO dealFileVO = new DealFileVO();
+            dealFileVO.setFileIds(Collections.singletonList("1"));
+            dealFileVO.setTag(ProjectContent.FILE_SOURCE_SPARK_RAG_STR);
+            SliceConfig sliceConfig = new SliceConfig();
+            sliceConfig.setType(0);
+            dealFileVO.setSliceConfig(sliceConfig);
+
+            Result<Boolean> result = fileInfoV2Service.sliceFiles(dealFileVO);
+
+            assertThat(result.getData()).isTrue();
+            assertThat(sliceConfig.getSeperator()).containsExactly("\n");
+            verify(fileInfoV2Mapper, never()).listByIds(anyList());
         }
 
         /**

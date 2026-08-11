@@ -9,7 +9,6 @@ Provides helper methods for RAGFlow document processing, including file handling
 import asyncio
 import logging
 import os
-import time
 import urllib.parse
 from typing import Any, Dict, List, Optional, Union
 
@@ -19,10 +18,13 @@ from fastapi import UploadFile
 from knowledge.domain.platform_account_config import get_managed_config_value
 from knowledge.infra.ragflow.ragflow_client import (
     create_dataset,
+    fetch_all_document_chunks,
+    get_document_info,
     list_datasets,
-    list_document_chunks,
-    list_documents_in_dataset,
     update_dataset,
+)
+from knowledge.infra.ragflow.ragflow_client import (
+    wait_for_parsing as wait_for_document_parsing,
 )
 
 logger = logging.getLogger(__name__)
@@ -296,74 +298,148 @@ class RagflowUtils:
             return file_content, filename
 
     @staticmethod
+    def _normalize_expected_chunk_count(raw_count: Any) -> Optional[int]:
+        """Return a usable non-negative metadata count when one is available."""
+        try:
+            expected_count = int(raw_count) if raw_count is not None else None
+        except (TypeError, ValueError):
+            return None
+        if expected_count is not None and expected_count < 0:
+            return None
+        return expected_count
+
+    @staticmethod
+    def _finalize_chunk_retrieval(
+        dataset_id: str,
+        doc_id: str,
+        *,
+        expected_count: Optional[int],
+        last_visible_count: int,
+        max_retries: int,
+    ) -> List[Dict[str, Any]]:
+        """Return an empty snapshot or raise the final incomplete-state error."""
+        if expected_count is not None and expected_count > last_visible_count:
+            raise RuntimeError(
+                "RAGFlow chunk snapshot remained incomplete after retries: "
+                f"doc={doc_id}, visible={last_visible_count}, "
+                f"expected={expected_count}"
+            )
+
+        if last_visible_count > 0:
+            raise RuntimeError(
+                "RAGFlow chunk snapshot did not stabilize after retries: "
+                f"doc={doc_id}, visible={last_visible_count}, "
+                f"expected={expected_count}"
+            )
+
+        logger.warning(
+            "RAGFlow document returned zero chunks after retries: "
+            "dataset=%s doc=%s attempts=%d",
+            dataset_id,
+            doc_id,
+            max_retries + 1,
+        )
+        return []
+
+    @staticmethod
     async def get_document_chunks(
         dataset_id: str, doc_id: str, max_retries: int = 15, retry_delay: float = 3.0
     ) -> List[Dict[str, Any]]:
         """
-        Get all chunk content of a document
+        Get all chunks after parsing, retrying incomplete search snapshots.
+
+        Each attempt delegates to the canonical fail-closed paginator. RAGFlow
+        API errors and incomplete pagination therefore propagate instead of
+        being misreported as a valid empty document.
 
         Args:
             dataset_id: Dataset ID
             doc_id: Document ID
-            max_retries: Maximum number of retry attempts to get chunks (default: 15)
+            max_retries: Maximum incomplete-snapshot retries (default: 15)
             retry_delay: Delay between retries in seconds (default: 3.0)
 
         Returns:
-            List of chunk data, returns empty list if retrieval fails
+            Complete chunk list, or an empty list after all empty retries.
         """
-        try:
-            all_chunks = []
-            page = 1
-            page_size = 100  # Get 100 chunks per page
-            retry_count = 0
+        if max_retries < 0:
+            raise ValueError("max_retries must be non-negative")
+        if retry_delay < 0:
+            raise ValueError("retry_delay must be non-negative")
 
-            while True:
-                # Use functional API to get chunks, supports pagination
-                chunks_response = await list_document_chunks(
-                    dataset_id, doc_id, page=page, page_size=page_size
+        doc_info = await get_document_info(dataset_id, doc_id)
+        if doc_info is None:
+            raise RuntimeError(
+                f"RAGFlow document disappeared before chunk retrieval: doc={doc_id}"
+            )
+
+        expected_count = RagflowUtils._normalize_expected_chunk_count(
+            doc_info.get("chunk_count")
+        )
+
+        last_visible_count = 0
+        last_chunk_ids: Optional[tuple[str, ...]] = None
+        stable_partial_reads = 0
+        for attempt in range(max_retries + 1):
+            chunks = await fetch_all_document_chunks(dataset_id, doc_id, page_size=100)
+            last_visible_count = len(chunks)
+            has_complete_snapshot = (
+                expected_count is not None and last_visible_count >= expected_count
+            )
+            if has_complete_snapshot:
+                logger.info(
+                    "Retrieved complete RAGFlow chunk snapshot: "
+                    "dataset=%s doc=%s visible=%d expected=%s",
+                    dataset_id,
+                    doc_id,
+                    last_visible_count,
+                    expected_count,
                 )
+                return chunks
 
-                if chunks_response.get("code") == 0:
-                    data = chunks_response.get("data", {})
-                    chunks = data.get("chunks", [])
-                    total = data.get("total", 0)
+            chunk_ids = tuple(sorted(str(chunk.get("id", "")) for chunk in chunks))
+            if chunks and chunk_ids == last_chunk_ids:
+                stable_partial_reads += 1
+            else:
+                stable_partial_reads = 0
+            last_chunk_ids = chunk_ids
 
-                    if chunks:
-                        all_chunks.extend(chunks)
-                        logger.info(
-                            f"Got page {page} chunks: {len(chunks)} items, total: {len(all_chunks)} items"
-                        )
+            # RAGFlow may over-count document chunks when identical content in
+            # separate tasks produces the same content-addressed chunk ID.
+            # Treat metadata count as a visibility target, but accept a
+            # non-empty ID set after two additional unchanged observations.
+            if chunks and stable_partial_reads >= 2:
+                logger.warning(
+                    "RAGFlow chunk snapshot stabilized below metadata count: "
+                    "dataset=%s doc=%s visible=%d expected=%s",
+                    dataset_id,
+                    doc_id,
+                    last_visible_count,
+                    expected_count,
+                )
+                return chunks
 
-                        # If all chunks are retrieved, exit loop
-                        if len(all_chunks) >= total:
-                            break
-
-                        page += 1
-                        retry_count = 0
-                    else:
-                        # No chunks found - might be because RAGFlow is still indexing
-                        if retry_count < max_retries and page == 1:
-                            retry_count += 1
-                            logger.info(
-                                f"No chunks found yet for document {doc_id}, retrying... (attempt {retry_count}/{max_retries})"
-                            )
-                            await asyncio.sleep(retry_delay)
-                            continue
-                        else:
-                            # No more chunks or max retries reached
-                            break
-                else:
-                    logger.warning(f"Failed to get chunks: {chunks_response}")
-                    break
+            if attempt == max_retries:
+                break
 
             logger.info(
-                f"Successfully retrieved all {len(all_chunks)} chunks of document {doc_id}"
+                "RAGFlow chunks are not fully visible yet: "
+                "dataset=%s doc=%s visible=%d expected=%s retry=%d/%d",
+                dataset_id,
+                doc_id,
+                last_visible_count,
+                expected_count,
+                attempt + 1,
+                max_retries,
             )
-            return all_chunks
+            await asyncio.sleep(retry_delay)
 
-        except Exception as e:
-            logger.error(f"Exception while getting document chunks: {e}")
-            return []
+        return RagflowUtils._finalize_chunk_retrieval(
+            dataset_id,
+            doc_id,
+            expected_count=expected_count,
+            last_visible_count=last_visible_count,
+            max_retries=max_retries,
+        )
 
     @staticmethod
     def convert_to_standard_format(
@@ -398,119 +474,22 @@ class RagflowUtils:
         return result
 
     @staticmethod
-    async def _check_document_status(dataset_id: str, doc_id: str) -> tuple[str, int]:
-        """
-        Check parsing status of a single document
-
-        Args:
-            dataset_id: Dataset ID
-            doc_id: Document ID
-
-        Returns:
-            (status, token count)
-        """
-        response = await list_documents_in_dataset(dataset_id, doc_id)
-
-        if response.get("code") != 0:
-            return "UNKNOWN", 0
-
-        docs = response.get("data", {}).get("docs", [])
-        for doc in docs:
-            if doc.get("id") == doc_id:
-                run_status = doc.get("run", "UNSTART")
-                token_count = doc.get("token_count", 0)
-                return run_status, token_count
-
-        logger.warning(f"Document {doc_id} not found in list")
-        return "NOT_FOUND", 0
-
-    @staticmethod
-    def _handle_parsing_status(
-        doc_id: str, run_status: str, token_count: int
-    ) -> Optional[str]:
-        """
-        Handle parsing status
-
-        Args:
-            doc_id: Document ID
-            run_status: Running status
-            token_count: Token count
-
-        Returns:
-            Processed status, returns None if need to continue waiting
-        """
-        if run_status == "DONE":
-            if token_count > 0:
-                logger.info(
-                    f"Document {doc_id} parsing completed with {token_count} tokens"
-                )
-                return run_status
-            else:
-                logger.warning(
-                    f"Document {doc_id} status is DONE but token_count is 0, will continue waiting..."
-                )
-                return None
-        elif run_status == "FAIL":
-            raise Exception(f"Document {doc_id} parsing failed")
-        elif run_status == "RUNNING":
-            logger.info(f"Document {doc_id} is being parsed...")
-
-        return None  # Continue waiting
-
-    @staticmethod
     async def wait_for_parsing(
         dataset_id: str, doc_id: str, max_wait_time: int = 300
     ) -> str:
-        """
-        Wait for document parsing completion
-
-        Args:
-            dataset_id: Dataset ID
-            doc_id: Document ID
-            max_wait_time: Maximum wait time (seconds)
-
-        Returns:
-            Final parsing status
-
-        Raises:
-            Exception: Raised when parsing fails
-        """
-        start_time = time.time()
-        last_status = None
-
-        while time.time() - start_time < max_wait_time:
-            try:
-                run_status, token_count = await RagflowUtils._check_document_status(
-                    dataset_id, doc_id
-                )
-
-                if run_status != last_status:
-                    logger.info(
-                        f"Document {doc_id} status: {run_status}, tokens: {token_count}"
-                    )
-                    last_status = run_status
-
-                # Handle status, if returns non-None value, parsing is complete or failed
-                result = RagflowUtils._handle_parsing_status(
-                    doc_id, run_status, token_count
-                )
-                if result:
-                    return result
-
-                await asyncio.sleep(1)
-
-            except Exception as e:
-                logger.warning(f"Error checking parsing status: {e}")
-                await asyncio.sleep(1)
-
-        logger.warning(
-            f"Document parsing timeout after {max_wait_time} seconds, last status: {last_status}"
+        """Backward-compatible wrapper around the canonical client poller."""
+        return await wait_for_document_parsing(
+            dataset_id=dataset_id,
+            doc_id=doc_id,
+            max_wait_time=max_wait_time,
         )
-        return last_status or "TIMEOUT"
 
     @staticmethod
     def build_parser_config(
-        lengthRange: List[int], overlap: int, separator: List[str], titleSplit: bool
+        lengthRange: Optional[List[int]],
+        overlap: int,
+        separator: Optional[List[str]],
+        titleSplit: bool,
     ) -> Dict[str, Any]:
         """
         Build parser configuration
@@ -524,31 +503,49 @@ class RagflowUtils:
         Returns:
             Parser configuration dictionary
         """
-        # Build RAGFlow parser configuration based on abstract interface parameters
-        chunk_token_count = (
-            lengthRange[1]
-            if len(lengthRange) > 1
-            else lengthRange[0] if lengthRange else 256
-        )
+        # RAGFlow's parser uses the configured maximum as its target chunk
+        # size. ``overlap`` and ``titleSplit`` are intentionally not forwarded:
+        # v0.20.5 has no overlap field, and title splitting is not equivalent
+        # to changing PDF layout recognition/OCR mode.
+        _ = overlap, titleSplit
+        if lengthRange is None:
+            chunk_token_num = 256
+        else:
+            if len(lengthRange) not in (1, 2) or any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in lengthRange
+            ):
+                raise ValueError("lengthRange must contain one or two integers")
+            if any(value <= 0 for value in lengthRange):
+                raise ValueError("lengthRange values must be greater than zero")
+            if len(lengthRange) == 2 and lengthRange[0] > lengthRange[1]:
+                raise ValueError("lengthRange minimum cannot exceed maximum")
+            chunk_token_num = lengthRange[-1]
 
-        # Separator handling: convert abstract interface separator to RAGFlow delimiter format
-        delimiter = "\\n"
-        if separator:
-            delimiter = "".join(separator) + "\\n"
+        # The Astron UI can send either a literal ``\\n`` or an actual newline.
+        # In RAGFlow v0.20.5, unquoted delimiter characters are independent;
+        # a multi-character delimiter must be wrapped in backticks.
+        normalized_separators = []
+        for value in separator or []:
+            normalized = value.replace("\\n", "\n")
+            if not normalized:
+                continue
+            normalized_separators.append(
+                normalized if len(normalized) == 1 else f"`{normalized}`"
+            )
+        if not any("\n" in value for value in normalized_separators):
+            normalized_separators.append("\n")
+        delimiter = "".join(normalized_separators)
 
         parser_config = {
-            "chunk_token_count": min(
-                chunk_token_count, 2048
-            ),  # RAGFlow limits maximum 2048
+            "chunk_token_num": min(chunk_token_num, 2048),
             "delimiter": delimiter,
-            "layout_recognize": titleSplit,  # Use titleSplit to control layout recognition
-            "html4excel": False,
-            "task_page_size": 12,  # PDF specific, default value
-            "raptor": {"use_raptor": False},
         }
 
         logger.info(
-            f"Built parser config: chunk_size={chunk_token_count}, delimiter='{delimiter}', layout_recognize={titleSplit}"
+            "Built RAGFlow parser config: chunk_token_num=%d, delimiter=%r",
+            parser_config["chunk_token_num"],
+            delimiter,
         )
         return parser_config
 
