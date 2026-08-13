@@ -108,6 +108,42 @@ days. The organization security policy has a separate 48-hour acknowledgment tar
 for vulnerability reports. Independent deployers must publish their own service
 level and emergency path.
 
+### Appeals for community harassment decisions
+
+For harassment or other Code of Conduct cases on Astron Agent's project-managed
+community surfaces, the reporter, the person accused, or another person materially
+affected by the outcome may request a review. Send the request to
+[ifly_opensource@iflytek.com](mailto:ifly_opensource@iflytek.com) with the subject
+`Astron Agent Code of Conduct appeal`. Include the original case reference, the
+outcome being challenged, and at least one reason for review, such as a material
+procedural error, a relevant conflict of interest, significant new evidence, or
+a remedy that appears clearly disproportionate.
+
+Appeals are handled as follows:
+
+1. Receipt should be acknowledged within a few business days. If more time is
+   needed, the appellant should receive periodic status updates where practical.
+2. A person who did not make the original decision and has no conflict of interest
+   will review the request. The reviewer may seek an additional impartial reviewer
+   or qualified external advice when the case requires it.
+3. Review is limited to the stated grounds and relevant evidence. It is not a new
+   investigation unless fairness or significant new information requires one.
+4. Temporary protective measures may remain in place during review when needed to
+   protect people or evidence. They may be modified if they become unnecessary or
+   disproportionate.
+5. The reviewer may uphold, modify, or reverse the original decision, or return
+   the matter for a new investigation. The appellant and other affected parties
+   will receive a written outcome and a concise explanation to the extent privacy,
+   safety, and law permit.
+
+Appeal information is shared only with people who need it to conduct the review,
+protect participants, or comply with law. Reviewers must protect reporter and
+witness identities, avoid unnecessary disclosure of personal data, and follow the
+confidentiality and conflict-of-interest rules in the linked incident resolution
+procedures. Retaliation for making or participating in a good-faith appeal is
+prohibited. This process does not restrict any rights or remedies available under
+applicable law.
+
 ## Review, action, notice, and appeal
 
 A deployer's documented moderation process should:
