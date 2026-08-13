@@ -101,10 +101,12 @@ and its detailed [community security policy](https://github.com/iflytek/communit
 Do not disclose vulnerabilities or personal data in a public issue.
 
 The project does not yet have enough comparable content reports to publish a
-meaningful historical average response time. Its target is to acknowledge reports
-about project-managed surfaces within three business days. The organization security
-policy has a separate 48-hour acknowledgment target for vulnerability reports.
-Independent deployers must publish their own service level and emergency path.
+meaningful historical average response time. The iFLYTEK community's
+[incident resolution procedures](https://github.com/iflytek/community/blob/master/code-of-conduct/coc-incident-resolution-procedures.md)
+state that Code of Conduct reports are usually acknowledged within a few business
+days. The organization security policy has a separate 48-hour acknowledgment target
+for vulnerability reports. Independent deployers must publish their own service
+level and emergency path.
 
 ## Review, action, notice, and appeal
 
