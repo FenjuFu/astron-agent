@@ -55,9 +55,9 @@ Important limitations are public and intentional:
 
 The relevant settings are documented in the workflow configuration templates, and
 the implementation is available in the
-[workflow audit system](../core/workflow/infra/audit_system/). Operators may add
-compatible layers at the model gateway, workflow, plugin, or application boundary,
-but should test their behavior before relying on them.
+[workflow audit system](https://github.com/iflytek/astron-agent/tree/main/core/workflow/infra/audit_system).
+Operators may add compatible layers at the model gateway, workflow, plugin, or
+application boundary, but should test their behavior before relying on them.
 
 ## Deployment safeguards
 
@@ -87,14 +87,14 @@ Turning on the optional audit service is one control, not a complete safety prog
 Reports about content in an independently operated Astron Agent application must
 go to that application's operator. The operator should publish a contact method
 near the user experience and ask reporters for the content or workflow identifier,
-time, reason for concern, and enough context to investigate. Reporters should not
-resend
-sensitive content unless it is necessary and the channel is protected.
+time, reason for concern, and enough context to investigate. Reporters should avoid
+resending sensitive content unless it is necessary and the channel is protected.
 
 For content on Astron Agent's project-managed community surfaces, report abusive
 or harassing conduct to
 [ifly_opensource@iflytek.com](mailto:ifly_opensource@iflytek.com) under the
-[Code of Conduct](../.github/code_of_conduct.md). Report security vulnerabilities
+[Code of Conduct](https://github.com/iflytek/astron-agent/blob/main/.github/code_of_conduct.md).
+Report security vulnerabilities
 privately to [security@iflytek.com](mailto:security@iflytek.com) under the public
 [iFLYTEK organization security policy](https://github.com/iflytek/.github/blob/main/SECURITY.md)
 and its detailed [community security policy](https://github.com/iflytek/community/blob/master/SECURITY.md).
@@ -138,8 +138,9 @@ contact and high-risk tools, provide child-accessible notices and reporting, and
 route serious concerns to trained personnel and the appropriate authorities.
 
 If those protections cannot be provided, the workflow should not be offered to
-children. The project [Code of Conduct](../.github/code_of_conduct.md) separately
-protects community participation from harassment regardless of age.
+children. The project
+[Code of Conduct](https://github.com/iflytek/astron-agent/blob/main/.github/code_of_conduct.md)
+separately protects community participation from harassment regardless of age.
 
 ## Privacy, transparency, and review
 
