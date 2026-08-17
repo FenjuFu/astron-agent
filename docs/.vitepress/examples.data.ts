@@ -14,10 +14,17 @@ export interface ExampleMeta {
   dslVersion: string;
   event: string;
   repoPath: string; // e.g. examples/history-knowledge-qa
+  hasPreview: boolean;
+  previewUrl: string;
 }
 
 declare const data: ExampleMeta[];
 export { data };
+
+const previewAssets = import.meta.glob("../../examples/*/preview.png", {
+  eager: true,
+  import: "default"
+}) as Record<string, string>;
 
 function parseFrontmatter(md: string): Record<string, string | string[]> | null {
   const m = md.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -48,11 +55,11 @@ function parseFrontmatter(md: string): Record<string, string | string[]> | null 
 }
 
 export default {
-  // Re-run when any example README changes.
-  watch: ["../../examples/*/README.md"],
+  // Re-run when example metadata or preview availability changes.
+  watch: ["../../examples/*/README.md", "../../examples/*/preview.png"],
   load(watchedFiles: string[]): ExampleMeta[] {
     const examples: ExampleMeta[] = [];
-    for (const file of watchedFiles) {
+    for (const file of watchedFiles.filter((file) => basename(file) === "README.md")) {
       const id = basename(dirname(file));
       if (id === "TEMPLATE") continue;
       const fm = parseFrontmatter(readFileSync(file, "utf8"));
@@ -67,7 +74,9 @@ export default {
         sourceUrl: String(fm.sourceUrl ?? ""),
         dslVersion: String(fm.dslVersion ?? ""),
         event: String(fm.event ?? ""),
-        repoPath: `examples/${id}`
+        repoPath: `examples/${id}`,
+        hasPreview: Boolean(previewAssets[`../../examples/${id}/preview.png`]),
+        previewUrl: previewAssets[`../../examples/${id}/preview.png`] ?? ""
       });
     }
     return examples.sort((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title));
