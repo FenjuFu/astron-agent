@@ -7,6 +7,11 @@ from typing import Any, AsyncIterator
 
 import aiohttp
 import httpx
+from common.otlp.trace.langfuse import (
+    WORKFLOW_TRACE_AUDIENCE,
+    inject_trusted_langfuse_context,
+    redact_trusted_trace_headers,
+)
 from common.otlp.trace.span import Span
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
@@ -60,9 +65,16 @@ class WorkflowPluginRunner(BaseModel):
                 "flow_id": self.flow_id,
                 "uid": self.uid,
                 "parameters": action_input,
-                "extra_body": {"bot_id": "workflow", "caller": "agent"},
+                "ext": {"bot_id": "workflow", "caller": "agent"},
             },
-            "extra_headers": {"X-consumer-username": self.app_id},
+            "extra_headers": {
+                "X-consumer-username": self.app_id,
+                **inject_trusted_langfuse_context(
+                    method="POST",
+                    audience=WORKFLOW_TRACE_AUDIENCE,
+                    tenant_id=self.app_id,
+                ),
+            },
         }
 
     def _create_error_response(
@@ -115,10 +127,18 @@ class WorkflowPluginRunner(BaseModel):
         with span.start("Run") as sp:
             start_time = int(round(time.time() * 1000))
             params = self._build_request_params(action_input)
+            logged_params = {
+                **params,
+                "extra_headers": redact_trusted_trace_headers(
+                    params.get("extra_headers", {})
+                ),
+            }
 
             sp.add_info_events(
                 attributes={
-                    "workflow-plugin-run-inputs": json.dumps(params, ensure_ascii=False)
+                    "workflow-plugin-run-inputs": json.dumps(
+                        logged_params, ensure_ascii=False
+                    )
                 }
             )
 

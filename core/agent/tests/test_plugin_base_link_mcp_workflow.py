@@ -1,11 +1,17 @@
 """Test plugin base/link/mcp/workflow module"""
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 import pytest
 from common.otlp import sid as sid_module
 from common.otlp.trace.span import Span
+from openai import AsyncOpenAI
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from agent.exceptions.plugin_exc import PluginExc
 from agent.service.plugin.base import BasePlugin, PluginResponse
@@ -241,6 +247,65 @@ class TestWorkflowPluginRunnerAndFactory:
         params = runner._build_request_params({"p": 1})
         assert params["extra_body"]["flow_id"] == "fid"
         assert params["extra_body"]["parameters"] == {"p": 1}
+        assert params["extra_body"]["ext"] == {
+            "bot_id": "workflow",
+            "caller": "agent",
+        }
+        assert "extra_body" not in params["extra_body"]
+
+    @pytest.mark.asyncio
+    async def test_openai_wire_request_preserves_nested_trace_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LANGFUSE_ENABLED", "true")
+        monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+        monkeypatch.setenv("ASTRON_TRACE_CONTEXT_SECRET", "astron-trace-test-secret")
+        captured: dict[str, Any] = {}
+
+        async def handle_request(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content)
+            captured["headers"] = dict(request.headers)
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=b"data: [DONE]\n\n",
+            )
+
+        provider = TracerProvider()
+        tracer = provider.get_tracer("agent-workflow-wire-test")
+        runner = WorkflowPluginRunner(
+            app_id="synthetic-app", uid="synthetic-user", flow_id="flow-42"
+        )
+
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(handle_request)
+            ) as http_client:
+                client = AsyncOpenAI(
+                    base_url="http://workflow.test/workflow/v1",
+                    api_key="synthetic-key",
+                    http_client=http_client,
+                )
+                with tracer.start_as_current_span("agent.workflow-handoff") as parent:
+                    params = runner._build_request_params({"city": "Hefei"})
+                    stream = await client.chat.completions.create(**params)
+                    async for _ in stream:
+                        pass
+
+                    parent_context = parent.get_span_context()
+        finally:
+            provider.shutdown()
+
+        assert captured["body"]["ext"] == {
+            "bot_id": "workflow",
+            "caller": "agent",
+        }
+        traceparent = captured["headers"]["traceparent"].split("-")
+        assert traceparent[1] == f"{parent_context.trace_id:032x}"
+        assert traceparent[2] == f"{parent_context.span_id:016x}"
+        assert "x-astron-langfuse-trace-timestamp" in captured["headers"]
+        assert "x-astron-langfuse-trace-signature" in captured["headers"]
 
     def test_create_error_and_success_response(self) -> None:
         runner = WorkflowPluginRunner(app_id="app", uid="u", flow_id="fid")
@@ -257,8 +322,16 @@ class TestWorkflowPluginRunnerAndFactory:
     async def test_workflow_runner_timeout(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setenv("LANGFUSE_ENABLED", "true")
+        monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+        monkeypatch.setenv("ASTRON_TRACE_CONTEXT_SECRET", "astron-trace-test-secret")
         runner = WorkflowPluginRunner(app_id="app", uid="u", flow_id="fid")
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
         span = Span(app_id="app", uid="u")
+        span.tracer = provider.get_tracer("workflow-plugin-log-redaction-test")
 
         # mock AsyncOpenAI.chat.completions.create to raise timeout
         import httpx
@@ -288,9 +361,29 @@ class TestWorkflowPluginRunnerAndFactory:
         # workflow module originally doesn't have agent_config attribute, here dynamically add it via raising=False
         monkeypatch.setattr(wf_mod, "agent_config", DummyConfig(), raising=False)
 
-        with pytest.raises(PluginExc):
-            async for _ in runner.run({"x": 1}, span):
-                pass
+        try:
+            with pytest.raises(PluginExc):
+                async for _ in runner.run({"x": 1}, span):
+                    pass
+
+            finished = exporter.get_finished_spans()
+            assert len(finished) == 1
+            event_attributes = [
+                dict(event.attributes or {}) for event in finished[0].events
+            ]
+            logged_request = next(
+                attributes["workflow-plugin-run-inputs"]
+                for attributes in event_attributes
+                if "workflow-plugin-run-inputs" in attributes
+            )
+            assert isinstance(logged_request, str)
+            assert "traceparent" not in logged_request
+            assert "tracestate" not in logged_request
+            assert "baggage" not in logged_request
+            assert "x-astron-langfuse-trace-timestamp" not in logged_request
+            assert "x-astron-langfuse-trace-signature" not in logged_request
+        finally:
+            provider.shutdown()
 
     @pytest.mark.asyncio
     async def test_workflow_factory_create_default_plugin(

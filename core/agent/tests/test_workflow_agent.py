@@ -1,12 +1,16 @@
 """Test workflow_agent API endpoint"""
 
+import asyncio
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from common.otlp import sid as sid_module
 from common.otlp.trace.span import Span
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from starlette.responses import StreamingResponse
 
 from agent.api.schemas.llm_message import LLMMessage
@@ -129,6 +133,40 @@ class TestCustomChatCompletion:
 
                     assert len(results) > 0
 
+    @pytest.mark.asyncio
+    async def test_disabled_langfuse_preserves_existing_root_span_shape(
+        self,
+        completion: CustomChatCompletion,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        completion.span.tracer = provider.get_tracer("disabled-agent-root-test")
+
+        async def mock_run_runner(*_args: Any, **_kwargs: Any) -> AsyncIterator[str]:
+            yield 'data: {"code":0,"choices":[]}\n\n'
+
+        with (
+            patch.object(
+                CustomChatCompletion, "build_node_trace", return_value=object()
+            ),
+            patch.object(CustomChatCompletion, "build_meter", return_value=object()),
+            patch.object(CustomChatCompletion, "run_runner", mock_run_runner),
+        ):
+            results = [item async for item in completion.do_complete()]
+
+        spans = exporter.get_finished_spans()
+        assert results
+        assert len(spans) == 1
+        assert spans[0].name == "WorkflowAgentNode"
+        assert not any(
+            key.startswith(("langfuse.", "gen_ai."))
+            for key in (spans[0].attributes or {})
+        )
+        provider.shutdown()
+
 
 class TestCustomChatCompletionsEndpoint:
     """Test custom_chat_completions endpoint"""
@@ -187,3 +225,93 @@ class TestCustomChatCompletionsEndpoint:
                     content += bytes(chunk)
 
             assert b"[DONE]" in content
+
+    @pytest.mark.asyncio
+    async def test_endpoint_closes_inner_stream_on_disconnect(
+        self, completion_inputs: CustomCompletionInputs
+    ) -> None:
+        """Closing the response body must cascade into the traced producer."""
+        mock_completion = AsyncMock()
+        inner_closed = False
+
+        async def mock_do_complete() -> AsyncIterator[str]:
+            nonlocal inner_closed
+            try:
+                yield "data: first\n\n"
+                await asyncio.Event().wait()
+            finally:
+                inner_closed = True
+
+        mock_completion.do_complete = mock_do_complete
+        with patch(
+            "agent.api.v1.workflow_agent.CustomChatCompletion",
+            return_value=mock_completion,
+        ):
+            response = await custom_chat_completions(
+                x_consumer_username="test_app",
+                completion_inputs=completion_inputs,
+            )
+            body_iterator = cast(Any, response.body_iterator)
+            assert await anext(body_iterator) == "data: first\n\n"
+            await body_iterator.aclose()
+
+        assert inner_closed is True
+
+    @pytest.mark.asyncio
+    async def test_asgi_23_disconnect_closes_suspended_inner_stream(
+        self, completion_inputs: CustomCompletionInputs
+    ) -> None:
+        """A real ASGI disconnect must cancel the traced producer immediately."""
+        mock_completion = AsyncMock()
+        inner_closed = asyncio.Event()
+
+        async def mock_do_complete() -> AsyncIterator[str]:
+            try:
+                yield "data: first\n\n"
+                await asyncio.Event().wait()
+            finally:
+                inner_closed.set()
+
+        mock_completion.do_complete = mock_do_complete
+        with patch(
+            "agent.api.v1.workflow_agent.CustomChatCompletion",
+            return_value=mock_completion,
+        ):
+            response = await custom_chat_completions(
+                x_consumer_username="test_app",
+                completion_inputs=completion_inputs,
+            )
+
+        disconnect = asyncio.Event()
+
+        async def receive() -> dict[str, str]:
+            await disconnect.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message: dict[str, Any]) -> None:
+            if message["type"] == "http.response.body" and message.get("more_body"):
+                disconnect.set()
+                # Model a network send that is cancelled by Starlette's ASGI
+                # 2.3 disconnect listener after the generator yielded a frame.
+                await asyncio.Event().wait()
+
+        scope = cast(
+            Any,
+            {
+                "type": "http",
+                "asgi": {"version": "3.0", "spec_version": "2.3"},
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "http",
+                "path": "/custom/chat/completions",
+                "raw_path": b"/custom/chat/completions",
+                "query_string": b"",
+                "headers": [],
+                "client": None,
+                "server": None,
+                "root_path": "",
+            },
+        )
+        await asyncio.wait_for(response(scope, receive, send), timeout=1)
+
+        assert inner_closed.is_set()

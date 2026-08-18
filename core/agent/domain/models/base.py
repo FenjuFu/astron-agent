@@ -1,35 +1,179 @@
 import json
 import os
+import re
 from typing import Any, AsyncIterator, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
+from common.otlp.trace.langfuse import langfuse_enabled
 from common.otlp.trace.span import Span
-from openai import APIError, APITimeoutError
+from openai import APIError, APIStatusError, APITimeoutError
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from agent.exceptions.plugin_exc import PluginExc, llm_plugin_error
+
+_UNSUPPORTED_STREAM_USAGE_MARKERS = (
+    "extra field",
+    "extra inputs",
+    "extra_forbidden",
+    "invalid",
+    "not allowed",
+    "not permitted",
+    "not support",
+    "unexpected",
+    "unknown",
+    "unrecognized",
+    "unsupported",
+)
+
+_ERROR_FIELD_KEYS = {
+    "field",
+    "loc",
+    "param",
+    "parameter",
+    "path",
+}
+_ERROR_REASON_KEYS = {
+    "code",
+    "description",
+    "detail",
+    "error",
+    "message",
+    "msg",
+    "reason",
+    "status",
+    "type",
+}
+_ERROR_CONTAINER_KEYS = {
+    "cause",
+    "causes",
+    "detail",
+    "details",
+    "error",
+    "errors",
+    "violations",
+}
+_STREAM_USAGE_FIELD = r"(?:stream_options|include_usage)"
+_PLAIN_STREAM_USAGE_REJECTION_PATTERNS = (
+    rf"(?:unsupported|unknown|unrecognized|unexpected|invalid|"
+    rf"not\s+(?:supported|allowed|permitted))\s+"
+    rf"(?:(?:request|keyword)\s+)?(?:parameter|field|argument|option|name)\b"
+    rf"(?:\s+(?:supplied|provided|named|called))?\s*[:=]?\s*[\"']?"
+    rf"{_STREAM_USAGE_FIELD}\b",
+    rf"\b{_STREAM_USAGE_FIELD}\b"
+    rf"(?:\s+(?:parameter|field|argument|option))?\s*"
+    rf"(?:(?:is|was|are)\s+|:\s*)"
+    rf"(?:unsupported|invalid|unknown|unrecognized|unexpected|"
+    rf"not\s+(?:a\s+)?(?:supported|allowed|permitted))\b",
+    rf"(?:extra\s+(?:field|inputs?)|extra_forbidden)\s*:\s*"
+    rf"\b{_STREAM_USAGE_FIELD}\b",
+)
+
+
+def _error_value_text(value: Any) -> str:
+    """Return scalar error context without serializing echoed request bodies."""
+    if isinstance(value, (str, int, float, bool)):
+        return str(value)
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(item, (str, int, float, bool)) for item in value
+    ):
+        return " ".join(str(item) for item in value)
+    return ""
+
+
+def _error_contexts(value: Any) -> list[tuple[str, str]]:
+    """Extract related field/reason pairs while ignoring request echoes."""
+    contexts: list[tuple[str, str]] = []
+    if isinstance(value, dict):
+        field_parts: list[str] = []
+        reason_parts: list[str] = []
+        for key, item in value.items():
+            normalized_key = str(key).lower()
+            text = _error_value_text(item)
+            if text and normalized_key in _ERROR_FIELD_KEYS:
+                field_parts.append(text)
+            elif text and normalized_key in _ERROR_REASON_KEYS:
+                reason_parts.append(text)
+        if field_parts or reason_parts:
+            contexts.append((" ".join(field_parts), " ".join(reason_parts)))
+        for key, item in value.items():
+            normalized_key = str(key).lower()
+            if normalized_key in _ERROR_CONTAINER_KEYS and isinstance(
+                item, (dict, list)
+            ):
+                contexts.extend(_error_contexts(item))
+    elif isinstance(value, list):
+        for item in value:
+            contexts.extend(_error_contexts(item))
+    return contexts
+
+
+def _plain_stream_usage_is_unsupported(message: str) -> bool:
+    return any(
+        re.search(pattern, message.lower())
+        for pattern in _PLAIN_STREAM_USAGE_REJECTION_PATTERNS
+    )
+
+
+def _stream_usage_is_unsupported(error: APIStatusError) -> bool:
+    """Identify a provider rejecting only the optional stream usage field."""
+    if error.status_code not in {400, 422}:
+        return False
+    body = getattr(error, "body", None)
+    if not isinstance(body, (dict, list)):
+        message = str(body or getattr(error, "message", "") or error)
+        return _plain_stream_usage_is_unsupported(message)
+    for field_text, reason_text in _error_contexts(body):
+        field_message = field_text.lower()
+        reason_message = reason_text.lower()
+        names_usage_field = (
+            "stream_options" in field_message or "include_usage" in field_message
+        )
+        if names_usage_field and any(
+            marker in reason_message for marker in _UNSUPPORTED_STREAM_USAGE_MARKERS
+        ):
+            return True
+        if _plain_stream_usage_is_unsupported(reason_message):
+            return True
+    return False
 
 
 class BaseLLMModel(BaseModel):
     name: str
     llm: Any = None
+    _stream_usage_supported: bool = PrivateAttr(default=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     async def create_completion(self, messages: list, stream: bool) -> Any:
-        request_kwargs = {
+        request_kwargs: dict[str, Any] = {
             "messages": messages,
             "stream": stream,
             "model": self.name,
             "timeout": int(os.getenv("DEFAULT_LLM_TIMEOUT", "90")),
         }
+        if stream and langfuse_enabled() and self._stream_usage_supported:
+            request_kwargs["stream_options"] = {"include_usage": True}
         max_tokens = os.getenv("DEFAULT_LLM_MAX_TOKEN")
         if max_tokens:
             request_kwargs["max_tokens"] = int(max_tokens)
 
-        return await self.llm.chat.completions.create(**request_kwargs)
+        try:
+            return await self.llm.chat.completions.create(**request_kwargs)
+        except APIStatusError as error:
+            if (
+                "stream_options" not in request_kwargs
+                or not _stream_usage_is_unsupported(error)
+            ):
+                raise
+            # Some older OpenAI-compatible providers reject stream_options.
+            # A 400/422 validation response arrives before the SDK opens an SSE
+            # stream, so no client-visible output has been emitted. Cache the
+            # capability to avoid repeating the rejected request.
+            self._stream_usage_supported = False
+            request_kwargs.pop("stream_options", None)
+            return await self.llm.chat.completions.create(**request_kwargs)
 
     def _log_messages_to_span(self, sp: Span, messages: list) -> None:
         for message in messages:
@@ -131,6 +275,32 @@ class CompatChoice(BaseModel):
 class CompatChunk(BaseModel):
     choices: list[CompatChoice]
     usage: Optional[CompatUsage] = None
+
+
+def _merge_compat_usage(current: dict[str, int], raw_usage: Any) -> bool:
+    """Merge one cumulative provider usage snapshot into canonical token names."""
+    if not isinstance(raw_usage, dict):
+        return False
+
+    found = False
+    aliases = {
+        "prompt_tokens": ("prompt_tokens", "input_tokens"),
+        "completion_tokens": ("completion_tokens", "output_tokens"),
+        "total_tokens": ("total_tokens",),
+    }
+    for canonical_key, provider_keys in aliases.items():
+        for provider_key in provider_keys:
+            value = raw_usage.get(provider_key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                current[canonical_key] = value
+                found = True
+                break
+
+    if found and "total_tokens" not in raw_usage:
+        current["total_tokens"] = current.get("prompt_tokens", 0) + current.get(
+            "completion_tokens", 0
+        )
+    return found
 
 
 class ProviderLLMModel(BaseLLMModel):
@@ -241,7 +411,8 @@ class AnthropicLLMModel(ProviderLLMModel):
     ) -> AsyncIterator[CompatChunk]:
         event_type = ""
         data_lines: list[str] = []
-        usage: dict[str, Any] = {}
+        usage: dict[str, int] = {}
+        has_usage = False
         emitted_stop = False
 
         async for line in response.aiter_lines():
@@ -251,10 +422,14 @@ class AnthropicLLMModel(ProviderLLMModel):
                     continue
                 payload = json.loads("\n".join(data_lines))
                 data_lines = []
-                usage = payload.get("usage") or usage
                 normalized: dict[str, Any] | None = None
 
-                if event_type == "content_block_delta":
+                if event_type == "message_start":
+                    message = payload.get("message") or {}
+                    has_usage = (
+                        _merge_compat_usage(usage, message.get("usage")) or has_usage
+                    )
+                elif event_type == "content_block_delta":
                     delta = payload.get("delta", {})
                     normalized = {
                         "choices": [
@@ -265,34 +440,40 @@ class AnthropicLLMModel(ProviderLLMModel):
                                 },
                                 "finish_reason": None,
                             }
-                        ],
-                        "usage": usage,
+                        ]
                     }
                 elif event_type == "message_delta":
-                    normalized = {
-                        "choices": [
-                            {
-                                "delta": {"content": "", "reasoning_content": ""},
-                                "finish_reason": payload.get("delta", {}).get(
-                                    "stop_reason"
-                                )
-                                or "stop",
-                            }
-                        ],
-                        "usage": payload.get("usage") or usage,
-                    }
-                    emitted_stop = True
+                    has_usage = (
+                        _merge_compat_usage(usage, payload.get("usage")) or has_usage
+                    )
+                    stop_reason = payload.get("delta", {}).get("stop_reason")
+                    if stop_reason:
+                        normalized = {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "content": "",
+                                        "reasoning_content": "",
+                                    },
+                                    "finish_reason": stop_reason,
+                                }
+                            ]
+                        }
+                        emitted_stop = True
                 elif event_type == "message_stop":
-                    normalized = {
-                        "choices": [
-                            {
-                                "delta": {"content": "", "reasoning_content": ""},
-                                "finish_reason": "stop",
-                            }
-                        ],
-                        "usage": usage,
-                    }
-                    emitted_stop = True
+                    if not emitted_stop:
+                        normalized = {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "content": "",
+                                        "reasoning_content": "",
+                                    },
+                                    "finish_reason": "stop",
+                                }
+                            ]
+                        }
+                        emitted_stop = True
                 elif event_type == "error":
                     error = payload.get("error", {})
                     llm_plugin_error(
@@ -318,10 +499,11 @@ class AnthropicLLMModel(ProviderLLMModel):
                             "delta": {"content": "", "reasoning_content": ""},
                             "finish_reason": "stop",
                         }
-                    ],
-                    "usage": usage,
+                    ]
                 }
             )
+        if has_usage and langfuse_enabled():
+            yield CompatChunk(choices=[], usage=CompatUsage(**usage))
 
 
 class GoogleLLMModel(ProviderLLMModel):
@@ -388,7 +570,8 @@ class GoogleLLMModel(ProviderLLMModel):
         candidate = (payload.get("candidates") or [{}])[0]
         finish_reason = candidate.get("finishReason")
         parts = candidate.get("content", {}).get("parts", [])
-        normalized = {
+        usage_metadata = payload.get("usageMetadata") or {}
+        normalized: dict[str, Any] = {
             "choices": [
                 {
                     "delta": {
@@ -409,8 +592,10 @@ class GoogleLLMModel(ProviderLLMModel):
                         else (str(finish_reason).lower() if finish_reason else None)
                     ),
                 }
-            ],
-            "usage": {
+            ]
+        }
+        if usage_metadata:
+            normalized["usage"] = {
                 "prompt_tokens": (payload.get("usageMetadata") or {}).get(
                     "promptTokenCount", 0
                 ),
@@ -420,8 +605,7 @@ class GoogleLLMModel(ProviderLLMModel):
                 "total_tokens": (payload.get("usageMetadata") or {}).get(
                     "totalTokenCount", 0
                 ),
-            },
-        }
+            }
         return self._build_compat_chunk(normalized)
 
     async def _yield_normalized_chunks(  # type: ignore[override]  # noqa: C901
@@ -435,6 +619,7 @@ class GoogleLLMModel(ProviderLLMModel):
 
         data_lines: list[str] = []
         emitted_stop = False
+        latest_usage: CompatUsage | None = None
 
         async for line in response.aiter_lines():
             if not line:
@@ -445,6 +630,9 @@ class GoogleLLMModel(ProviderLLMModel):
                 if raw_data == "[DONE]":
                     break
                 chunk = self._normalize_payload_to_chunk(json.loads(raw_data))
+                if chunk.usage is not None:
+                    latest_usage = chunk.usage
+                    chunk.usage = None
                 if chunk.choices[0].finish_reason:
                     emitted_stop = True
                 yield chunk
@@ -455,6 +643,9 @@ class GoogleLLMModel(ProviderLLMModel):
 
         if data_lines:
             chunk = self._normalize_payload_to_chunk(json.loads("\n".join(data_lines)))
+            if chunk.usage is not None:
+                latest_usage = chunk.usage
+                chunk.usage = None
             if chunk.choices[0].finish_reason:
                 emitted_stop = True
             yield chunk
@@ -470,3 +661,5 @@ class GoogleLLMModel(ProviderLLMModel):
                     ]
                 }
             )
+        if latest_usage is not None and langfuse_enabled():
+            yield CompatChunk(choices=[], usage=latest_usage)

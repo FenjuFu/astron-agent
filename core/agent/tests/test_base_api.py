@@ -14,7 +14,7 @@ from agent.api.schemas.base_inputs import BaseInputs, MetaDataInputs
 from agent.api.schemas.completion_chunk import ReasonChatCompletionChunk
 from agent.api.schemas.llm_message import LLMMessage
 from agent.api.schemas.node_trace_patch import NodeTracePatch as NodeTrace
-from agent.api.v1.base_api import CompletionBase, json_serializer
+from agent.api.v1.base_api import CompletionBase, RunContext, json_serializer
 from agent.exceptions.agent_exc import AgentInternalExc, AgentNormalExc
 
 
@@ -216,6 +216,38 @@ class TestCompletionBase:
             assert len(results) > 0
 
     @pytest.mark.asyncio
+    async def test_run_runner_aclose_does_not_yield_from_finalizer(
+        self, completion: ConcreteCompletion, span: Span, node_trace: NodeTrace
+    ) -> None:
+        """A client disconnect closes the source iterator and returns cleanly."""
+        mock_chunk = MagicMock()
+        mock_chunk.object = "chat.completion.chunk"
+        mock_chunk.model_dump_json.return_value = '{"test": "chunk"}'
+        mock_chunk.id = None
+        source_closed = False
+
+        async def mock_run_generator() -> AsyncIterator[MagicMock]:
+            nonlocal source_closed
+            try:
+                yield mock_chunk
+                while True:  # pragma: no cover - cancelled by aclose
+                    yield mock_chunk
+            finally:
+                source_closed = True
+
+        mock_runner = AsyncMock()
+        mock_runner.run = AsyncMock(return_value=mock_run_generator())
+
+        with patch.object(ConcreteCompletion, "build_runner", return_value=mock_runner):
+            response_stream = completion.run_runner(
+                node_trace, Meter("app", "func"), span
+            )
+            assert "data:" in await anext(response_stream)
+            await response_stream.aclose()
+
+        assert source_closed is True
+
+    @pytest.mark.asyncio
     async def test_run_runner_build_failed(
         self, completion: ConcreteCompletion, span: Span, node_trace: NodeTrace
     ) -> None:
@@ -247,6 +279,31 @@ class TestCompletionBase:
 
             # Should produce error response
             assert len(results) > 0
+
+    def test_disabled_langfuse_keeps_error_span_status_and_attributes_unchanged(
+        self,
+        completion: ConcreteCompletion,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Langfuse errors must not alter the existing disabled OTel span shape."""
+        monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+        error = AgentInternalExc("synthetic failure")
+        span = MagicMock()
+        node_trace = MagicMock()
+        context = RunContext(
+            error=error,
+            error_log="synthetic traceback",
+            chunk_logs=[],
+            span=span,
+            node_trace_log=node_trace,
+            meter=MagicMock(),
+        )
+
+        completion._finalize_run(context)
+
+        span.set_status.assert_not_called()
+        span.set_attributes.assert_called_once_with(attributes={"code": error.c})
+        node_trace.record_end.assert_called_once_with()
 
     @pytest.mark.asyncio
     async def test_run_runner_with_base_exc_error(
