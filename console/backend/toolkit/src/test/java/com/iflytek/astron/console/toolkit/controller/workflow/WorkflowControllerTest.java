@@ -697,6 +697,29 @@ class WorkflowControllerTest {
 
             verify(workflowService).build(validWorkflowReq);
         }
+
+        @Test
+        @DisplayName("Should report successful execution eligibility")
+        void executionEligibility_whenPersistedDraftIsExecutable_shouldReturnSuccess() {
+            ApiResult<Void> result = controller.executionEligibility(VALID_FLOW_ID);
+
+            assertThat(result.code()).isZero();
+            assertThat(result.data()).isNull();
+            verify(workflowService).ensureExecutionEligible(VALID_FLOW_ID);
+        }
+
+        @Test
+        @DisplayName("Should preserve unresolved dependency errors from execution eligibility")
+        void executionEligibility_whenDependencyIsUnresolved_shouldPropagateBusinessError() {
+            BusinessException unresolved =
+                    new BusinessException(ResponseEnum.WORKFLOW_IMPORT_DEPENDENCY_UNRESOLVED);
+            doThrow(unresolved).when(workflowService).ensureExecutionEligible(VALID_FLOW_ID);
+
+            assertThatThrownBy(() -> controller.executionEligibility(VALID_FLOW_ID))
+                    .isSameAs(unresolved)
+                    .extracting("code")
+                    .isEqualTo(ResponseEnum.WORKFLOW_IMPORT_DEPENDENCY_UNRESOLVED.getCode());
+        }
     }
 
     // ==================== Node Debug Tests ====================
@@ -1079,6 +1102,8 @@ class WorkflowControllerTest {
         @DisplayName("Should import workflow successfully when file is valid")
         void importWorkflow_whenFileIsValid_shouldImportWorkflowSuccessfully() throws Exception {
             // Given
+            when(multipartFile.isEmpty()).thenReturn(false);
+            when(multipartFile.getSize()).thenReturn(128L);
             when(multipartFile.getInputStream()).thenReturn(new ByteArrayInputStream("yaml content".getBytes()));
 
             ApiResult<?> expected = ApiResult.success();
@@ -1106,6 +1131,8 @@ class WorkflowControllerTest {
         @DisplayName("Should throw BusinessException when IOException occurs while importing")
         void importWorkflow_whenIOExceptionOccurs_shouldThrowBusinessException() throws Exception {
             // Given
+            when(multipartFile.isEmpty()).thenReturn(false);
+            when(multipartFile.getSize()).thenReturn(128L);
             when(multipartFile.getInputStream()).thenThrow(new IOException("File read error"));
             when(multipartFile.getOriginalFilename()).thenReturn("workflow.yaml");
 
@@ -1113,6 +1140,39 @@ class WorkflowControllerTest {
             assertThatThrownBy(() -> controller.importWorkflow(multipartFile, request))
                     .isInstanceOf(BusinessException.class)
                     .hasFieldOrPropertyWithValue("responseEnum", ResponseEnum.WORKFLOW_IMPORT_FAILED);
+
+            verifyNoInteractions(workflowService, workflowExportService);
+        }
+
+        @Test
+        @DisplayName("Should preserve a business exception raised while importing")
+        void importWorkflow_whenServiceRejectsImport_shouldPreserveBusinessException()
+                throws Exception {
+            when(multipartFile.isEmpty()).thenReturn(false);
+            when(multipartFile.getSize()).thenReturn(128L);
+            when(multipartFile.getInputStream())
+                    .thenReturn(new ByteArrayInputStream("yaml content".getBytes()));
+            when(multipartFile.getOriginalFilename()).thenReturn("workflow.yaml");
+            BusinessException expected = new BusinessException(
+                    ResponseEnum.WORKFLOW_DLS_UPLOAD_FAILED);
+            when(workflowExportService.importWorkflowFromYaml(any(), eq(request)))
+                    .thenThrow(expected);
+
+            assertThatThrownBy(() -> controller.importWorkflow(multipartFile, request))
+                    .isSameAs(expected)
+                    .hasFieldOrPropertyWithValue(
+                            "responseEnum", ResponseEnum.WORKFLOW_DLS_UPLOAD_FAILED);
+        }
+
+        @Test
+        @DisplayName("Should reject oversized workflow YAML before parsing")
+        void importWorkflow_whenFileExceedsLimit_shouldRejectBeforeParsing() {
+            when(multipartFile.isEmpty()).thenReturn(false);
+            when(multipartFile.getSize()).thenReturn(20L * 1024 * 1024 + 1);
+
+            assertThatThrownBy(() -> controller.importWorkflow(multipartFile, request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("responseEnum", ResponseEnum.WORKFLOW_DLS_UPLOAD_FAILED);
 
             verifyNoInteractions(workflowService, workflowExportService);
         }

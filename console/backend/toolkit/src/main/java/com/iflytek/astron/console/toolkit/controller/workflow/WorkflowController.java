@@ -67,6 +67,7 @@ import java.util.List;
 @Tag(name = "Workflow management interface")
 public class WorkflowController {
 
+    private static final long MAX_WORKFLOW_IMPORT_BYTES = 20L * 1024 * 1024;
 
     private final WorkflowService workflowService;
     private final TalkAgentService talkAgentService;
@@ -191,6 +192,17 @@ public class WorkflowController {
             description = "Workflow Build")
     public Object build(@RequestBody @NotNull WorkflowReq buildDto) throws InterruptedException {
         return workflowService.build(buildDto);
+    }
+
+    /**
+     * Validate the persisted workflow draft against the same authorization and dependency guard used by
+     * debug execution. This endpoint is read-only and never trusts a client-submitted workflow
+     * protocol.
+     */
+    @GetMapping("/execution-eligibility")
+    public ApiResult<Void> executionEligibility(@RequestParam @NotBlank String flowId) {
+        workflowService.ensureExecutionEligible(flowId);
+        return ApiResult.success();
     }
 
     // ---------------------- Nodes and Dialogs ----------------------
@@ -474,9 +486,21 @@ public class WorkflowController {
      * Import workflow from YAML.
      */
     @PostMapping("/import")
+    @SpacePreAuth(
+            key = "WorkflowController_importWorkflow_POST",
+            module = "Workflow",
+            point = "Workflow Import",
+            description = "Workflow Import")
     public Object importWorkflow(@RequestParam("file") MultipartFile file, HttpServletRequest request) {
+        if (file == null || file.isEmpty() || file.getSize() > MAX_WORKFLOW_IMPORT_BYTES) {
+            throw new BusinessException(ResponseEnum.WORKFLOW_DLS_UPLOAD_FAILED);
+        }
         try (InputStream inputStream = file.getInputStream()) {
             return workflowExportService.importWorkflowFromYaml(inputStream, request);
+        } catch (BusinessException e) {
+            log.warn("import workflow rejected, filename={}, code={}",
+                    file.getOriginalFilename(), e.getCode());
+            throw e;
         } catch (Exception e) {
             log.error("import workflow failed, filename={}", file.getOriginalFilename(), e);
             throw new BusinessException(ResponseEnum.WORKFLOW_IMPORT_FAILED);
