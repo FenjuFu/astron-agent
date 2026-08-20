@@ -123,7 +123,7 @@ docker compose -f docker-compose-with-auth.yaml up -d
 ## 🌟 スター履歴
 
 <div align="center">
-  <img src="https://api.star-history.com/svg?repos=iflytek/astron-agent&type=Date" alt="Star History Chart" width="600">
+  <img src="../star-history.svg" alt="Star History Chart" width="600">
 </div>
 
 ## 📞 サポート
