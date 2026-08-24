@@ -91,7 +91,8 @@ HOST_BASE_ADDRESS=http://localhost
 
 **Notes:**
 - If you use a domain name for access, replace `localhost` with your domain name
-- Ensure nginx and minio ports are properly exposed
+- Expose only the Astron Agent application entry point (Nginx/Ingress) to users
+- Keep the bundled MinIO API and administrative console on their secure defaults: host loopback only with Docker Compose and `ClusterIP` with Helm. Expose either endpoint only for an explicit operational requirement and only behind independent authentication, TLS, and network-policy/firewall restrictions; never publish MinIO directly to the Internet
 
 #### 2.2 Prepare Business Capability Account Information (configure in the UI after startup)
 

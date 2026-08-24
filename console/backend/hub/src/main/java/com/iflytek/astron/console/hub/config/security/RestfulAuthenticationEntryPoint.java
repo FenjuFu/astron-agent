@@ -1,6 +1,5 @@
 package com.iflytek.astron.console.hub.config.security;
 
-import com.alibaba.fastjson2.JSON;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.response.ApiResult;
@@ -33,7 +32,12 @@ public class RestfulAuthenticationEntryPoint implements AuthenticationEntryPoint
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
 
         ApiResult<String> apiResult = ApiResult.error(ResponseEnum.UNAUTHORIZED);
-        log.debug("RequestURL: {}, params: {}, AuthenticationException: {}", request.getRequestURL(), JSON.toJSONString(request.getParameterMap()), authException.getMessage());
+        log.debug(
+                "Rejected unauthenticated request, method={}, uri={}, remote={}, reason={}",
+                request.getMethod(),
+                request.getRequestURI(),
+                request.getRemoteAddr(),
+                authException.getMessage());
         response.getWriter().write(objectMapper.writeValueAsString(apiResult));
     }
 }

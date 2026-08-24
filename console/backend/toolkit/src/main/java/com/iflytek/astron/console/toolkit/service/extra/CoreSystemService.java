@@ -95,12 +95,23 @@ public class CoreSystemService {
             requestHeader = assembleRequestHeader(url, apiUrl.getTenantKey(), apiUrl.getTenantSecret(), "POST", body.getBytes(StandardCharsets.UTF_8));
         }
         requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
-        log.info("workflow protocol publish, url = {}, body = {}, header={}", url, body, requestHeader);
+        log.info(
+                "workflow protocol publish, url = {}, flowId = {}, bodyBytes = {}",
+                url,
+                flowId,
+                body.getBytes(StandardCharsets.UTF_8).length);
         String response = OkHttpUtil.post(url, requestHeader, body);
-        log.info("workflow protocol publish, response = {}", response);
-        ApiResult<?> result = JSON.parseObject(response, ApiResult.class);
+        ApiResult<?> result = parseApiResult(response, "workflow protocol publish", url);
+        log.info(
+                "workflow protocol publish response, url = {}, flowId = {}, statusCode = {}",
+                url,
+                flowId,
+                result == null ? null : result.code());
+        if (result == null) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
         if (result.code() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.message());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -132,12 +143,23 @@ public class CoreSystemService {
         }
         String authBody = authJson.toString();
         requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
-        log.info("workflow protocol auth, url = {}, body = {},header={}", authUrl, authBody, requestHeader);
+        log.info(
+                "workflow protocol auth, url = {}, flowId = {}, bodyBytes = {}",
+                authUrl,
+                flowId,
+                authBody.getBytes(StandardCharsets.UTF_8).length);
         String authResponse = OkHttpUtil.post(authUrl, requestHeader, authBody);
-        log.info("workflow protocol auth, response = {}", authResponse);
-        ApiResult<?> authResult = JSON.parseObject(authResponse, ApiResult.class);
+        ApiResult<?> authResult = parseApiResult(authResponse, "workflow protocol auth", authUrl);
+        log.info(
+                "workflow protocol auth response, url = {}, flowId = {}, statusCode = {}",
+                authUrl,
+                flowId,
+                authResult == null ? null : authResult.code());
+        if (authResult == null) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
         if (authResult.code() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, authResult.message());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -160,17 +182,29 @@ public class CoreSystemService {
             requestHeader = assembleRequestHeader(uploadUrl, apiKey, apiSecret, "POST", convertMapToBytes(param));
             requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
             requestHeader.put("Content-Type", "multipart/form-data");
-            log.info("workflow protocol upload file, url = {},header={}", uploadUrl, requestHeader);
+            log.info(
+                    "workflow protocol upload file, url = {}, fileBytes = {}",
+                    uploadUrl,
+                    file.getSize());
             String authResponse = OkHttpUtil.postMultipart(uploadUrl, requestHeader, null, param);
-            log.info("workflow protocol upload file, response = {}", authResponse);
-            ApiResult<?> authResult = JSON.parseObject(authResponse, ApiResult.class);
+            ApiResult<?> authResult = parseApiResult(authResponse, "workflow protocol upload file", uploadUrl);
+            log.info(
+                    "workflow protocol upload file response, url = {}, statusCode = {}",
+                    uploadUrl,
+                    authResult == null ? null : authResult.code());
+            if (authResult == null) {
+                throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+            }
             if (authResult.code() != 0) {
-                throw new BusinessException(ResponseEnum.RESPONSE_FAILED, authResult.message());
+                throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
             }
             return ((Map<String, String>) authResult.data()).get("url");
         } catch (Exception ex) {
-            log.error("workflow protocol upload file error", ex);
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, ex.getMessage());
+            log.error(
+                    "workflow protocol upload file failed, url = {}, errorType = {}",
+                    uploadUrl,
+                    ex.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -193,17 +227,30 @@ public class CoreSystemService {
             requestHeader = assembleRequestHeader(authUrl, apiKey, apiSecret, "POST", convertMapToBytes(param));
             requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
             requestHeader.put("Content-Type", "multipart/form-data");
-            log.info("workflow protocol upload files, url = {},header={}", authUrl, requestHeader);
+            log.info(
+                    "workflow protocol upload files, url = {}, fileCount = {}",
+                    authUrl,
+                    files == null ? 0 : files.length);
             String authResponse = OkHttpUtil.postMultipart(authUrl, requestHeader, null, param);
-            log.info("workflow protocol upload files, response = {}", authResponse);
-            ApiResult<?> authResult = JSON.parseObject(authResponse, ApiResult.class);
+            ApiResult<?> authResult = parseApiResult(authResponse, "workflow protocol upload files", authUrl);
+            log.info(
+                    "workflow protocol upload files response, url = {}, statusCode = {}",
+                    authUrl,
+                    authResult == null ? null : authResult.code());
+            if (authResult == null) {
+                throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+            }
             if (authResult.code() != 0) {
-                throw new BusinessException(ResponseEnum.RESPONSE_FAILED, authResult.message());
+                throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
             }
             return ((Map<String, List<String>>) authResult.data()).get("urls");
         } catch (Exception ex) {
-            log.error("workflow protocol upload files error", ex);
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, ex.getMessage());
+            log.error(
+                    "workflow protocol upload files failed, url = {}, fileCount = {}, errorType = {}",
+                    authUrl,
+                    files == null ? 0 : files.length,
+                    ex.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -322,12 +369,24 @@ public class CoreSystemService {
 
         String body = jsonObject.toString();
 
-        log.info("workflow add comparisons, url = {}, body = {}", url, body);
+        log.info(
+                "workflow add comparisons, url = {}, flowId = {}, version = {}, bodyBytes = {}",
+                url,
+                flowId,
+                version,
+                body.getBytes(StandardCharsets.UTF_8).length);
         String response = OkHttpUtil.post(url, body);
-        log.info("workflow add comparisons, response = {}", response);
-        ApiResult<?> result = JSON.parseObject(response, ApiResult.class);
+        ApiResult<?> result = parseApiResult(response, "workflow add comparisons", url);
+        log.info(
+                "workflow add comparisons response, url = {}, flowId = {}, statusCode = {}",
+                url,
+                flowId,
+                result == null ? null : result.code());
+        if (result == null) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
         if (result.code() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.message());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -343,11 +402,15 @@ public class CoreSystemService {
                 .fluentPut("version", version)
                 .toString();
         String response = OkHttpUtil.post(url, body);
-        JSONObject result = JSON.parseObject(response);
+        JSONObject result = parseJsonObject(response, "workflow get comparison", url);
+        log.info(
+                "workflow get comparison response, url = {}, flowId = {}, statusCode = {}",
+                url,
+                flowId,
+                result == null ? null : result.getInteger("code"));
         if (result == null || result.getIntValue("code") != 0
                 || !(result.get("data") instanceof Map<?, ?>)) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED,
-                    result == null ? "Invalid comparison response" : result.getString("message"));
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
         return result.getJSONObject("data");
     }
@@ -369,12 +432,24 @@ public class CoreSystemService {
 
         String body = jsonObject.toString();
 
-        log.info("workflow delete comparisons, url = {},body = {}", url, body);
+        log.info(
+                "workflow delete comparisons, url = {}, flowId = {}, version = {}, bodyBytes = {}",
+                url,
+                flowId,
+                version,
+                body.getBytes(StandardCharsets.UTF_8).length);
         String response = OkHttpUtil.delete(url, body);
-        log.info("workflow delete comparisons, response = {}", response);
-        ApiResult<?> result = JSON.parseObject(response, ApiResult.class);
+        ApiResult<?> result = parseApiResult(response, "workflow delete comparisons", url);
+        log.info(
+                "workflow delete comparisons response, url = {}, flowId = {}, statusCode = {}",
+                url,
+                flowId,
+                result == null ? null : result.code());
+        if (result == null) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
         if (result.code() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.message());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -401,12 +476,20 @@ public class CoreSystemService {
         }
         String body = params.toString();
         requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
-        log.info("create database, url = {}, body = {}, header={}", url, body, requestHeader);
+        log.info(
+                "create database, url = {}, spaceId = {}, bodyBytes = {}",
+                url,
+                spaceId,
+                body.getBytes(StandardCharsets.UTF_8).length);
         String response = OkHttpUtil.post(url, requestHeader, body);
-        log.info("create database, response = {}", response);
-        ApiResult<?> result = JSON.parseObject(response, ApiResult.class);
-        if (result.code() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.message());
+        ApiResult<?> result = parseApiResult(response, "create database", url);
+        log.info(
+                "create database response, url = {}, spaceId = {}, statusCode = {}",
+                url,
+                spaceId,
+                result == null ? null : result.code());
+        if (result == null || result.code() != 0) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
         return ((Map<String, Long>) result.data()).get("database_id");
     }
@@ -433,12 +516,21 @@ public class CoreSystemService {
         }
         String body = params.toString();
         requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
-        log.info("exec ddl, url = {}, body = {}, header={}", url, body, requestHeader);
+        log.info(
+                "exec ddl, url = {}, databaseId = {}, spaceId = {}, bodyBytes = {}",
+                url,
+                databaseId,
+                spaceId,
+                body.getBytes(StandardCharsets.UTF_8).length);
         String response = OkHttpUtil.post(url, requestHeader, body);
-        log.info("exec ddl, response = {}", response);
-        ApiResult<?> result = JSON.parseObject(response, ApiResult.class);
-        if (result.code() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.message());
+        ApiResult<?> result = parseApiResult(response, "exec ddl", url);
+        log.info(
+                "exec ddl response, url = {}, databaseId = {}, statusCode = {}",
+                url,
+                databaseId,
+                result == null ? null : result.code());
+        if (result == null || result.code() != 0) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -470,12 +562,23 @@ public class CoreSystemService {
         }
         String body = params.toString();
         requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
-        log.info("exec dml, url = {}, body = {}, header={}", url, body, requestHeader);
+        log.info(
+                "exec dml, url = {}, databaseId = {}, operateType = {}, execEnv = {}, bodyBytes = {}",
+                url,
+                databaseId,
+                operateType,
+                execEnv,
+                body.getBytes(StandardCharsets.UTF_8).length);
         String response = OkHttpUtil.post(url, requestHeader, body);
-        log.info("exec dml, response = {}", response);
-        ApiResult<?> result = JSON.parseObject(response, ApiResult.class);
-        if (result.code() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.message());
+        ApiResult<?> result = parseApiResult(response, "exec dml", url);
+        log.info(
+                "exec dml response, url = {}, databaseId = {}, operateType = {}, statusCode = {}",
+                url,
+                databaseId,
+                operateType,
+                result == null ? null : result.code());
+        if (result == null || result.code() != 0) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
         try {
             if (DBOperateEnum.SELECT.getCode().equals(operateType)) {
@@ -505,7 +608,12 @@ public class CoreSystemService {
                 return null;
             }
         } catch (Exception ex) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, "exec dml get search_data error = ," + ex.getMessage());
+            log.warn(
+                    "exec dml response parsing failed, databaseId = {}, operateType = {}, errorType = {}",
+                    databaseId,
+                    operateType,
+                    ex.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -529,17 +637,28 @@ public class CoreSystemService {
                 .toString();
         try {
             requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
-            log.info("clone database, url = {},params={}", cloneUrl, body);
+            log.info(
+                    "clone database, url = {}, databaseId = {}, bodyBytes = {}",
+                    cloneUrl,
+                    dbId,
+                    body.getBytes(StandardCharsets.UTF_8).length);
             String response = OkHttpUtil.post(cloneUrl, requestHeader, body);
-            log.info("clone database, response = {}", response);
-            ApiResult<?> result = JSON.parseObject(response, ApiResult.class);
-            if (result.code() != 0) {
-                throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.message());
+            ApiResult<?> result = parseApiResult(response, "clone database", cloneUrl);
+            log.info(
+                    "clone database response, url = {}, databaseId = {}, statusCode = {}",
+                    cloneUrl,
+                    dbId,
+                    result == null ? null : result.code());
+            if (result == null || result.code() != 0) {
+                throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
             }
             return ((Map<String, Long>) result.data()).get("database_id");
         } catch (Exception ex) {
-            log.error("clone database error", ex);
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, ex.getMessage());
+            log.error(
+                    "clone database failed, databaseId = {}, errorType = {}",
+                    dbId,
+                    ex.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -560,16 +679,27 @@ public class CoreSystemService {
                 .toString();
         try {
             requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
-            log.info("drop database, url = {},params={}", dropUrl, body);
+            log.info(
+                    "drop database, url = {}, databaseId = {}, bodyBytes = {}",
+                    dropUrl,
+                    dbId,
+                    body.getBytes(StandardCharsets.UTF_8).length);
             String response = OkHttpUtil.post(dropUrl, requestHeader, body);
-            log.info("drop database, response = {}", response);
-            ApiResult<?> result = JSON.parseObject(response, ApiResult.class);
-            if (result.code() != 0) {
-                throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.message());
+            ApiResult<?> result = parseApiResult(response, "drop database", dropUrl);
+            log.info(
+                    "drop database response, url = {}, databaseId = {}, statusCode = {}",
+                    dropUrl,
+                    dbId,
+                    result == null ? null : result.code());
+            if (result == null || result.code() != 0) {
+                throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
             }
         } catch (Exception ex) {
-            log.error("drop database error", ex);
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, ex.getMessage());
+            log.error(
+                    "drop database failed, databaseId = {}, errorType = {}",
+                    dbId,
+                    ex.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -592,16 +722,59 @@ public class CoreSystemService {
                 .toString();
         try {
             requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
-            log.info("modify database, url = {},params={}", modifyUrl, body);
+            log.info(
+                    "modify database, url = {}, databaseId = {}, bodyBytes = {}",
+                    modifyUrl,
+                    dbId,
+                    body.getBytes(StandardCharsets.UTF_8).length);
             String response = OkHttpUtil.post(modifyUrl, requestHeader, body);
-            log.info("modify database, response = {}", response);
-            ApiResult<?> result = JSON.parseObject(response, ApiResult.class);
-            if (result.code() != 0) {
-                throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.message());
+            ApiResult<?> result = parseApiResult(response, "modify database", modifyUrl);
+            log.info(
+                    "modify database response, url = {}, databaseId = {}, statusCode = {}",
+                    modifyUrl,
+                    dbId,
+                    result == null ? null : result.code());
+            if (result == null || result.code() != 0) {
+                throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
             }
         } catch (Exception ex) {
-            log.error("modify database error", ex);
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, ex.getMessage());
+            log.error(
+                    "modify database failed, databaseId = {}, errorType = {}",
+                    dbId,
+                    ex.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
+    }
+
+    private ApiResult<?> parseApiResult(String response, String operation, String url) {
+        try {
+            return JSON.parseObject(response, ApiResult.class);
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "{} response parse failed, url = {}, bodyBytes = {}, errorType = {}",
+                    operation,
+                    url,
+                    utf8Length(response),
+                    exception.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
+    }
+
+    private JSONObject parseJsonObject(String response, String operation, String url) {
+        try {
+            return JSON.parseObject(response);
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "{} response parse failed, url = {}, bodyBytes = {}, errorType = {}",
+                    operation,
+                    url,
+                    utf8Length(response),
+                    exception.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
+    }
+
+    private int utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(StandardCharsets.UTF_8).length;
     }
 }

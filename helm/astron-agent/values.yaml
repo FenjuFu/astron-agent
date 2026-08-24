@@ -4,8 +4,9 @@ global:
   imagePullPolicy: IfNotPresent
   storageClass: ""
   astronAgentVersion: latest
-  # Host base address for external access (e.g., http://your-domain.com)
-  # Used for MinIO server URL and other external endpoints
+  # Host base address for application access (e.g., https://your-domain.com).
+  # MinIO endpoints are configured independently under minio so enabling an
+  # application ingress never exposes object storage by accident.
   hostBaseAddress: "http://astron-agent.example.com"
 
 # Optional Langfuse OTLP/HTTP export shared by Agent and Workflow.
@@ -114,15 +115,48 @@ minio:
   persistence:
     enabled: true
     size: 20Gi
+  # MinIO and every in-chart S3 client read the same pre-created Secret. The
+  # chart intentionally never writes object-storage credentials into values or
+  # rendered manifests. Create this Secret before installation, for example:
+  #   kubectl create secret generic astron-agent-minio-credentials \
+  #     --from-literal=root-user="$(openssl rand -hex 12)" \
+  #     --from-literal=root-password="$(openssl rand -hex 24)"
+  # The runtime preflight rejects empty, short, and well-known credentials.
   auth:
-    rootUser: minioadmin
-    rootPassword: minioadmin123
+    existingSecret: astron-agent-minio-credentials
+    rootUserKey: root-user
+    rootPasswordKey: root-password
+    # Non-secret version/digest marker; change it when rotating the Secret in
+    # place so MinIO and all S3 consumers roll together.
+    existingSecretChecksum: ""
+    # Deprecated compatibility keys. Inline credentials are rejected because
+    # Helm would disclose them in values and rendered release manifests.
+    rootUser: ""
+    rootPassword: ""
+  # Optional exact origin (scheme + host + optional port; no path/query/fragment)
+  # used when generating URLs for clients outside the cluster. Core Agent also
+  # receives this as SKILL_RESOURCE_TRUSTED_ORIGIN and trusts no other remote
+  # Skill resource origin; consoleHub.env.ossBucketConsole is injected as the
+  # matching SKILL_RESOURCE_TRUSTED_BUCKET. Empty keeps URLs on the internal origin.
+  publicEndpoint: ""
+  # Required when minio.enabled=false and an enabled component uses S3.
+  # The same existingSecret above must contain credentials for this endpoint.
+  external:
+    endpoint: ""
+    # Must also be an exact origin when configured.
+    publicEndpoint: ""
   service:
-    type: NodePort
+    type: ClusterIP
     apiPort: 9000
-    consolePort: 9001
-    nodePort: 30900
-    consoleNodePort: 30901
+    nodePort: null
+  # The console is a separate service so exposing the API explicitly does not
+  # also expose the administrative UI. Keep ClusterIP and use port-forward for
+  # local maintenance; set NodePort/LoadBalancer only as an explicit opt-in.
+  consoleService:
+    enabled: true
+    type: ClusterIP
+    port: 9001
+    nodePort: null
   healthCheck:
     interval: 30
     timeout: 10
@@ -275,9 +309,11 @@ coreAitools:
     port: 18668
   env:
     servicePort: 18668
+    # Derived from minio.publicEndpoint/external.publicEndpoint by the template.
     ossDownloadHost: ""
     ossType: s3
-    ossEndpoint: "http://astron-agent-minio:9000"
+    # Derived from the global minio endpoint by the template.
+    ossEndpoint: ""
     ossAccessKeyId: ""
     ossAccessKeySecret: ""
     ossBucketName: "workflow"
@@ -389,6 +425,7 @@ coreWorkflow:
     port: 7880
   env:
     servicePort: 7880
+    # Derived from minio.publicEndpoint/external.publicEndpoint by the template.
     ossDownloadHost: ""
     runtimeEnv: dev
     mysqlHost: astron-agent-mysql
@@ -411,7 +448,8 @@ coreWorkflow:
     otlpTraceMaxExportBatchSize: "500"
     otlpTraceExportTimeoutMillis: "3000"
     ossType: s3
-    ossEndpoint: "http://astron-agent-minio:9000"
+    # Derived from the global minio endpoint by the template.
+    ossEndpoint: ""
     ossAccessKeyId: ""
     ossAccessKeySecret: ""
     ossBucketName: "workflow"
@@ -454,6 +492,26 @@ consoleHub:
   enabled: true
   image: console-hub
   replicaCount: 1
+  # Internal service credentials. Prefer a pre-created Secret so credentials never
+  # enter values or rendered manifests. The two default Secret names must be
+  # created by the operator before installation with independent random values
+  # under the keys below. When rotating an existing Secret in place,
+  # update existingSecretChecksum to force all three consumers to roll together.
+  # As an alternative, set token to a random value of at least 32 characters; the
+  # chart then creates a dedicated Secret. Explicit tokens take precedence over
+  # existingSecret and are intended mainly for non-GitOps installations.
+  artifactUpload:
+    token: ""
+    existingSecret: "astron-agent-artifact-upload-credential"
+    existingSecretKey: "artifact-upload-token"
+    # Non-secret version/digest marker; change whenever the referenced key rotates.
+    existingSecretChecksum: ""
+  sandboxRuntimeCredential:
+    token: ""
+    existingSecret: "astron-agent-sandbox-runtime-credential"
+    existingSecretKey: "sandbox-runtime-credential-token"
+    # Non-secret version/digest marker; change whenever the referenced key rotates.
+    existingSecretChecksum: ""
   resources:
     requests:
       memory: "2Gi"
@@ -481,12 +539,20 @@ consoleHub:
     redisPassword: ""
     redisDatabaseConsole: 0
     # OSS/MinIO Configuration
+    # Both endpoints are derived from the global minio configuration.
     ossRemoteEndpoint: ""
-    ossEndpoint: "http://astron-agent-minio:9000"
+    ossEndpoint: ""
     ossAccessKeyId: ""
     ossAccessKeySecret: ""
     ossBucketConsole: console-oss
     ossPresignExpirySecondsConsole: 600
+    # Workflow artifact storage and validation (non-sensitive). The artifact
+    # bucket must differ from ossBucketConsole because it is kept private.
+    skillSandboxArtifactBucket: workflow-artifacts
+    skillSandboxArtifactMaxFileSize: 20MB
+    skillSandboxArtifactMaxActiveFilesPerWorkflow: 1000
+    skillSandboxArtifactMaxActiveTotalSizePerWorkflow: 1GB
+    skillSandboxArtifactAllowedExtensions: "txt,md,csv,json,pdf,png,jpg,jpeg,gif,webp,doc,docx,xls,xlsx,ppt,pptx,zip"
     oauth2IssuerUri: ""
     oauth2JwkSetUri: "http://astron-agent-casdoor:8000/.well-known/jwks"
     oauth2Audience: astron-agent-client
@@ -543,6 +609,12 @@ consoleHub:
 
 # Ingress configuration
 ingress:
+  # SECURITY: the console API Ingress uses longer regex paths routed to a
+  # selectorless Service for service-only endpoints. The template asserts that
+  # these paths remain longer than the generic /console-api route so ingress-nginx
+  # orders them first. No snippet annotation is required. Other controllers must
+  # provide equivalent longest-path behavior or ingress must remain disabled in
+  # favor of a trusted gateway with an explicit public-path allowlist.
   enabled: true
   className: nginx
   annotations:

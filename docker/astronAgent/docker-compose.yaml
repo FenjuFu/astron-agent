@@ -122,25 +122,87 @@ services:
 #      timeout: ${HEALTH_CHECK_TIMEOUT:-10s}
 #      retries: ${HEALTH_CHECK_RETRIES:-60}
 
-  # MinIO Object Storage
+  # Validate object-storage credentials before MinIO starts. Docker Compose can
+  # require non-empty variables during interpolation; this one-shot check also
+  # rejects weak or well-known values without ever printing the credentials.
+  # The bundled MinIO image does not provision a second application user, so
+  # the OSS client credentials must match the configured MinIO root account.
+  minio-credentials-check:
+    image: busybox:1.35
+    container_name: astron-agent-minio-credentials-check
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?Set MINIO_ROOT_USER to a unique value of at least 8 characters}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD to a random value of at least 16 characters}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:?Set OSS_ACCESS_KEY_ID explicitly}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:?Set OSS_ACCESS_KEY_SECRET explicitly}"
+      OSS_REMOTE_ENDPOINT: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT to an exact http(s) origin}"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        reject_credential() {
+          echo "Object-storage credentials are empty, weak, or use a known default." >&2
+          exit 1
+        }
+        root_user_lower="$$(printf '%s' "$${MINIO_ROOT_USER}" | tr '[:upper:]' '[:lower:]')"
+        root_password_lower="$$(printf '%s' "$${MINIO_ROOT_PASSWORD}" | tr '[:upper:]' '[:lower:]')"
+        access_key_lower="$$(printf '%s' "$${OSS_ACCESS_KEY_ID}" | tr '[:upper:]' '[:lower:]')"
+        access_secret_lower="$$(printf '%s' "$${OSS_ACCESS_KEY_SECRET}" | tr '[:upper:]' '[:lower:]')"
+        [ "$${#MINIO_ROOT_USER}" -ge 8 ] || reject_credential
+        [ "$${#MINIO_ROOT_PASSWORD}" -ge 16 ] || reject_credential
+        [ "$${#OSS_ACCESS_KEY_ID}" -ge 8 ] || reject_credential
+        [ "$${#OSS_ACCESS_KEY_SECRET}" -ge 16 ] || reject_credential
+        [ "$${MINIO_ROOT_USER}" != "$${MINIO_ROOT_PASSWORD}" ] || reject_credential
+        [ "$${OSS_ACCESS_KEY_ID}" != "$${OSS_ACCESS_KEY_SECRET}" ] || reject_credential
+        if [ "$${MINIO_ROOT_USER}" != "$${OSS_ACCESS_KEY_ID}" ] || \
+           [ "$${MINIO_ROOT_PASSWORD}" != "$${OSS_ACCESS_KEY_SECRET}" ]; then
+          echo "Bundled MinIO requires OSS credentials to match MINIO_ROOT credentials." >&2
+          exit 1
+        fi
+        case "$${OSS_REMOTE_ENDPOINT}" in http://*|https://*) ;; *)
+          echo "OSS_REMOTE_ENDPOINT must be an exact http(s) origin." >&2
+          exit 1
+        esac
+        remote_authority="$${OSS_REMOTE_ENDPOINT#*://}"
+        case "$${remote_authority}" in ""|*/*|*\?*|*\#*|*@*)
+          echo "OSS_REMOTE_ENDPOINT must not contain credentials, a path, query, or fragment." >&2
+          exit 1
+        esac
+        case "$${root_user_lower}" in minioadmin|admin|administrator|root|changeme|change_me*) reject_credential ;; esac
+        case "$${root_password_lower}" in minioadmin|minioadmin123|admin|admin123|password|password123|changeme|change_me*) reject_credential ;; esac
+        case "$${access_key_lower}" in minioadmin|admin|administrator|root|changeme|change_me*) reject_credential ;; esac
+        case "$${access_secret_lower}" in minioadmin|minioadmin123|admin|admin123|password|password123|changeme|change_me*) reject_credential ;; esac
+        echo "Object-storage credential policy check passed."
+    network_mode: none
+    restart: "no"
+
+  # MinIO Object Storage. API and console ports are deliberately bound to the
+  # host loopback interface; containers use the private Compose network.
   minio:
     image: minio/minio:RELEASE.2025-07-23T15-54-02Z
     container_name: astron-agent-minio
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
-      MINIO_SERVER_URL: ${OSS_REMOTE_ENDPOINT:-http://localhost:18998}
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?Set MINIO_ROOT_USER to a unique value of at least 8 characters}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD to a random value of at least 16 characters}"
+      MINIO_SERVER_URL: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT to the API URL reachable by intended clients}"
     ports:
-      - "${EXPOSE_MINIO_PORT:-9000}:9000"
-      - "${EXPOSE_MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${EXPOSE_MINIO_PORT:-18998}:${EXPOSE_MINIO_PORT:-18998}"
+      - "127.0.0.1:${EXPOSE_MINIO_CONSOLE_PORT:-18999}:${EXPOSE_MINIO_CONSOLE_PORT:-18999}"
     volumes:
       - minio_data:/data
     networks:
-      - astron-agent-network
+      astron-agent-network:
+        aliases:
+          # Browsers resolve *.localhost to host loopback; containers resolve
+          # this same signed hostname directly to MinIO on the private network.
+          - minio.localhost
     restart: always
-    command: server /data --console-address ":9001"
+    command: server /data --address ":${EXPOSE_MINIO_PORT:-18998}" --console-address ":${EXPOSE_MINIO_CONSOLE_PORT:-18999}"
+    depends_on:
+      minio-credentials-check:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:${EXPOSE_MINIO_PORT:-18998}/minio/health/live"]
       interval: ${HEALTH_CHECK_INTERVAL:-30s}
       timeout: ${HEALTH_CHECK_TIMEOUT:-10s}
       retries: ${HEALTH_CHECK_RETRIES:-60}
@@ -301,11 +363,11 @@ services:
     environment:
       SERVICE_PORT: "${CORE_AITOOLS_PORT:-18668}"
       OSS_TYPE: "${OSS_TYPE:-s3}"
-      OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:9000}"
-      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:-minioadmin}"
-      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:-minioadmin123}"
+      OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:${EXPOSE_MINIO_PORT:-18998}}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:?Set OSS_ACCESS_KEY_ID explicitly}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:?Set OSS_ACCESS_KEY_SECRET explicitly}"
       OSS_BUCKET_NAME: "${OSS_BUCKET_NAME}"
-      OSS_DOWNLOAD_HOST: "${OSS_REMOTE_ENDPOINT}"
+      OSS_DOWNLOAD_HOST: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT explicitly}"
       OSS_TTL: "${OSS_TTL:-157788000}"
       KAFKA_ENABLE: "${KAFKA_ENABLE:-0}"
       KAFKA_SERVERS: "${KAFKA_SERVERS:-kafka:29092}"
@@ -393,6 +455,14 @@ services:
       APP_AUTH_PROT: "${APP_AUTH_PROT:-http}"
       APP_AUTH_API_KEY: "${APP_AUTH_API_KEY:-YOUR_APP_AUTH_API_KEY}"
       APP_AUTH_SECRET: "${APP_AUTH_SECRET:-YOUR_APP_AUTH_SECRET}"
+      SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN: "${SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN:-}"
+      SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN_FILE: "/app/secrets/artifact/artifact-upload-token"
+      SKILL_SANDBOX_ARTIFACT_UPLOAD_URL: "http://console-hub:8080/workflow/artifacts/internal-upload"
+      SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN: "${SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN:-}"
+      SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN_FILE: "/app/secrets/runtime/sandbox-runtime-credential-token"
+      SKILL_SANDBOX_RUNTIME_CONFIG_URL: "http://console-hub:8080/skill-sandbox/internal-runtime-config"
+      SKILL_RESOURCE_TRUSTED_ORIGIN: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT to the exact origin used by presigned URLs}"
+      SKILL_RESOURCE_TRUSTED_BUCKET: "${OSS_BUCKET_CONSOLE:?Set OSS_BUCKET_CONSOLE explicitly}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -404,6 +474,8 @@ services:
         condition: service_healthy
     volumes:
       - ./config/agent/config.env:/opt/core/agent/config.env
+      - artifact_upload_secrets:/app/secrets/artifact:ro
+      - sandbox_runtime_credential_secrets:/app/secrets/runtime:ro
     networks:
       - astron-agent-network
     healthcheck:
@@ -492,11 +564,11 @@ services:
       OTLP_TRACE_MAX_EXPORT_BATCH_SIZE: "${OTLP_TRACE_MAX_EXPORT_BATCH_SIZE:-500}"
       OTLP_TRACE_EXPORT_TIMEOUT_MILLIS: "${OTLP_TRACE_EXPORT_TIMEOUT_MILLIS:-3000}"
       OSS_TYPE: "${OSS_TYPE:-s3}"
-      OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:9000}"
-      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:-minioadmin}"
-      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:-minioadmin123}"
+      OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:${EXPOSE_MINIO_PORT:-18998}}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:?Set OSS_ACCESS_KEY_ID explicitly}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:?Set OSS_ACCESS_KEY_SECRET explicitly}"
       OSS_BUCKET_NAME: "${OSS_BUCKET_NAME}"
-      OSS_DOWNLOAD_HOST: "${OSS_REMOTE_ENDPOINT}"
+      OSS_DOWNLOAD_HOST: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT explicitly}"
       OSS_TTL: "${OSS_TTL:-157788000}"
       KAFKA_ENABLE: "${KAFKA_ENABLE:-0}"
       KAFKA_SERVERS: "${KAFKA_SERVERS:-kafka:29092}"
@@ -510,6 +582,12 @@ services:
       AGENT_BASE_URL: "${AGENT_BASE_URL:-http://core-agent:${CORE_AGENT_PORT}}"
       PGSQL_BASE_URL: "${PGSQL_BASE_URL:-http://core-database:${CORE_DATABASE_PORT}}"
       RPA_BASE_URL: "${RPA_BASE_URL:-http://core-rpa:${CORE_RPA_PORT}}"
+      SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN: "${SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN:-}"
+      SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN_FILE: "/app/secrets/artifact/artifact-upload-token"
+      SKILL_SANDBOX_ARTIFACT_UPLOAD_URL: "http://console-hub:8080/workflow/artifacts/internal-upload"
+      SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN: "${SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN:-}"
+      SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN_FILE: "/app/secrets/runtime/sandbox-runtime-credential-token"
+      SKILL_SANDBOX_RUNTIME_CONFIG_URL: "http://console-hub:8080/skill-sandbox/internal-runtime-config"
     depends_on:
       postgres:
         condition: service_healthy
@@ -522,6 +600,8 @@ services:
     volumes:
       - ./config/workflow/config.env:/opt/core/workflow/config.env
       - ./config/workflow/logs/:/opt/core/logs
+      - artifact_upload_secrets:/app/secrets/artifact:ro
+      - sandbox_runtime_credential_secrets:/app/secrets/runtime:ro
     networks:
       - astron-agent-network
     healthcheck:
@@ -595,11 +675,11 @@ services:
       REDIS_PORT: "${REDIS_PORT:-6379}"
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
       REDIS_DATABASE_CONSOLE: "${REDIS_DATABASE_CONSOLE:-0}"
-      OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:9000}"
-      OSS_REMOTE_ENDPOINT: "${OSS_REMOTE_ENDPOINT:-http://minio:9000}"
-      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:-minioadmin}"
-      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:-minioadmin123}"
-      OSS_BUCKET_CONSOLE: "${OSS_BUCKET_CONSOLE:-console}"
+      OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:${EXPOSE_MINIO_PORT:-18998}}"
+      OSS_REMOTE_ENDPOINT: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT explicitly}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:?Set OSS_ACCESS_KEY_ID explicitly}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:?Set OSS_ACCESS_KEY_SECRET explicitly}"
+      OSS_BUCKET_CONSOLE: "${OSS_BUCKET_CONSOLE:?Set OSS_BUCKET_CONSOLE explicitly}"
       OSS_PRESIGN_EXPIRY_SECONDS_CONSOLE: "${OSS_PRESIGN_EXPIRY_SECONDS_CONSOLE:-600}"
       OAUTH2_ISSUER_URI: "${OAUTH2_ISSUER_URI:-http://auth-server:8000}"
       OAUTH2_JWK_SET_URI: "${OAUTH2_JWK_SET_URI:-http://auth-server:8000/.well-known/jwks}"
@@ -649,7 +729,19 @@ services:
       TENANT_CREATE_APP: "${TENANT_CREATE_APP:-}"
       TENANT_GET_APP_DETAIL: "${TENANT_GET_APP_DETAIL:-}"
       TENANT_VERIFY_APP_AUTH: "${TENANT_VERIFY_APP_AUTH:-http://core-tenant:${CORE_TENANT_PORT:-5052}/v2/app/key/verify}"
-      
+      SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN: "${SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN:-}"
+      SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN_FILE: "/app/secrets/artifact/artifact-upload-token"
+      SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN: "${SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN:-}"
+      SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN_FILE: "/app/secrets/runtime/sandbox-runtime-credential-token"
+      SKILL_SANDBOX_ARTIFACT_BUCKET: "${SKILL_SANDBOX_ARTIFACT_BUCKET:-workflow-artifacts}"
+      SKILL_SANDBOX_ARTIFACT_MAX_FILE_SIZE: "${SKILL_SANDBOX_ARTIFACT_MAX_FILE_SIZE:-20MB}"
+      SKILL_SANDBOX_ARTIFACT_MAX_ACTIVE_FILES_PER_WORKFLOW: "${SKILL_SANDBOX_ARTIFACT_MAX_ACTIVE_FILES_PER_WORKFLOW:-1000}"
+      SKILL_SANDBOX_ARTIFACT_MAX_ACTIVE_TOTAL_SIZE_PER_WORKFLOW: "${SKILL_SANDBOX_ARTIFACT_MAX_ACTIVE_TOTAL_SIZE_PER_WORKFLOW:-1GB}"
+      SKILL_SANDBOX_ARTIFACT_ALLOWED_EXTENSIONS: "${SKILL_SANDBOX_ARTIFACT_ALLOWED_EXTENSIONS:-txt,md,csv,json,pdf,png,jpg,jpeg,gif,webp,doc,docx,xls,xlsx,ppt,pptx,zip}"
+    volumes:
+      - artifact_upload_secrets:/app/secrets/artifact
+      - sandbox_runtime_credential_secrets:/app/secrets/runtime
+
     expose:
       - "8080"
     depends_on:
@@ -689,4 +781,8 @@ volumes:
   minio_data:
     driver: local
   nginx_logs:
+    driver: local
+  artifact_upload_secrets:
+    driver: local
+  sandbox_runtime_credential_secrets:
     driver: local

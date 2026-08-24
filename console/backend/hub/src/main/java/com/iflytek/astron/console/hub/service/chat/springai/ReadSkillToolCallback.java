@@ -51,7 +51,7 @@ public class ReadSkillToolCallback implements ToolCallback {
     @Override
     public String call(String toolInput) {
         String requestedPath = parsePath(toolInput);
-        log.info("read_skill invoked, skillId={}, path={}", skillId, requestedPath);
+        log.info("read_skill invoked, skillId={}", skillId);
         JSONObject result = new JSONObject();
         result.put("skill_id", skillId);
         result.put("name", name);
@@ -67,17 +67,28 @@ public class ReadSkillToolCallback implements ToolCallback {
                 }
                 result.put("path", normalizePath(resource.getString("path")));
                 result.put("content", runtime.downloadText(resource.getString("downloadUrl")));
-                return result.toJSONString();
+                return logSuccess(result);
             }
             result.put("content", runtime.downloadText(downloadUrl));
             result.put("resources", manifest());
-            return result.toJSONString();
+            return logSuccess(result);
         } catch (Exception e) {
-            log.warn("read_skill failed, skillId={}, error={}", skillId, e.getMessage());
+            log.warn(
+                    "read_skill completed, skillId={}, status=failed, errorType={}",
+                    skillId,
+                    e.getClass().getSimpleName());
             result.put("error", "read_failed");
-            result.put("message", e.getMessage());
             return result.toJSONString();
         }
+    }
+
+    private String logSuccess(JSONObject result) {
+        String serialized = result.toJSONString();
+        log.info(
+                "read_skill completed, skillId={}, status=success, responseBytes={}",
+                skillId,
+                serialized.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+        return serialized;
     }
 
     private String parsePath(String toolInput) {

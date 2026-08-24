@@ -92,7 +92,8 @@ HOST_BASE_ADDRESS=http://localhost
 
 **说明：**
 - 如果您使用域名访问，请将 `localhost` 替换为您的域名
-- 确保 nginx 和 minio 的端口已正确开放
+- 仅向用户公开 Astron Agent 的应用入口（Nginx/Ingress）
+- 内置 MinIO API 与管理控制台必须保持安全默认值：Docker Compose 仅绑定宿主机回环地址，Helm 使用 `ClusterIP`。只有存在明确运维需求，并配置独立认证、TLS 与网络策略/防火墙限制时，才可显式开放相应端点；禁止将 MinIO 直接发布到互联网
 
 #### 2.2 准备业务能力账号信息（启动后在页面配置）
 

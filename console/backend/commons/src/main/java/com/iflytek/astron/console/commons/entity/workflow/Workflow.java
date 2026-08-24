@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import lombok.Data;
 
+import com.iflytek.astron.console.commons.util.WorkflowProtocolSanitizer;
+
 import java.util.Date;
 
 @Data
@@ -47,4 +49,13 @@ public class Workflow {
 
     Long spaceId;
     Integer type;
+
+    public void setData(String data) {
+        this.data = WorkflowProtocolSanitizer.sanitize(data);
+    }
+
+    public void setPublishedData(String publishedData) {
+        this.publishedData = WorkflowProtocolSanitizer.sanitize(publishedData);
+    }
+
 }

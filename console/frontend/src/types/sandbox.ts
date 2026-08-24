@@ -8,8 +8,6 @@ export interface SkillSandboxConfig {
   lastTestStatus?: string;
   lastTestMessage?: string;
   lastTestTime?: string;
-  artifactUploadUrl?: string;
-  artifactUploadToken?: string;
   spaceId?: number;
 }
 

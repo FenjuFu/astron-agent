@@ -13,7 +13,6 @@
                w.created_time AS createdTime,
                w.updated_time,
                w.is_version,
-               w.sys_data,
                w.description,
                w.publish_channel,
                w.publish_result,
@@ -32,9 +31,35 @@
 
     </select>
     <select id="selectPageLatestByName" resultType="com.iflytek.astron.console.toolkit.entity.table.workflow.WorkflowVersion">
-        SELECT *
+        SELECT id,
+               bot_id,
+               name,
+               version_num,
+               data,
+               flow_id,
+               deleted,
+               created_time,
+               updated_time,
+               is_version,
+               description,
+               publish_channel,
+               publish_result,
+               advanced_config
         FROM (
-                 SELECT wv.*,
+                 SELECT wv.id,
+                        wv.bot_id,
+                        wv.name,
+                        wv.version_num,
+                        wv.data,
+                        wv.flow_id,
+                        wv.deleted,
+                        wv.created_time,
+                        wv.updated_time,
+                        wv.is_version,
+                        wv.description,
+                        wv.publish_channel,
+                        wv.publish_result,
+                        wv.advanced_config,
                         ROW_NUMBER() OVER (PARTITION BY wv.name ORDER BY wv.created_time DESC) AS rn
                  FROM workflow_version wv
                  WHERE wv.bot_id = #{botId}

@@ -19,7 +19,7 @@ import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterator, Mapping, Optional, Sequence
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse, urlsplit
 
 from loguru import logger
 from opentelemetry import baggage
@@ -115,6 +115,21 @@ _CONTENT_KEY_PARTS = frozenset(
     }
 )
 _RESERVED_METADATA_PARTS = frozenset({"__proto__", "constructor", "proto", "prototype"})
+_PRESIGNED_QUERY_KEYS = frozenset(
+    {
+        "awsaccesskeyid",
+        "signature",
+        "x-amz-credential",
+        "x-amz-security-token",
+        "x-amz-signature",
+        "x-goog-credential",
+        "x-goog-signature",
+    }
+)
+_PRESIGNED_URL_MARKER = "[REDACTED_PRESIGNED_URL]"
+_URL_PATTERN = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+_MAX_EMBEDDED_JSON_STRING_LENGTH = 1024 * 1024
+_MAX_EMBEDDED_JSON_DEPTH = 8
 
 _ALLOWED_ATTRIBUTE_KEYS = frozenset(
     {
@@ -494,18 +509,73 @@ def _has_content_key(key: str) -> bool:
     return bool(_key_parts(key).intersection(_CONTENT_KEY_PARTS))
 
 
-def _sanitize_payload(value: Any) -> Any:
+def _url_contains_credentials(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        if parsed.username is not None or parsed.password is not None:
+            return True
+        keys = {
+            key.lower()
+            for key, _item in parse_qsl(parsed.query, keep_blank_values=True)
+        }
+        return bool(keys.intersection(_PRESIGNED_QUERY_KEYS))
+    except (TypeError, ValueError):
+        return False
+
+
+def _redact_presigned_urls(value: str) -> str:
+    return _URL_PATTERN.sub(
+        lambda match: (
+            _PRESIGNED_URL_MARKER
+            if _url_contains_credentials(match.group(0))
+            else match.group(0)
+        ),
+        value,
+    )
+
+
+def _sanitize_string_payload(value: str, depth: int) -> str:
+    redacted = _redact_presigned_urls(value)
+    if (
+        depth >= _MAX_EMBEDDED_JSON_DEPTH
+        or len(redacted) > _MAX_EMBEDDED_JSON_STRING_LENGTH
+    ):
+        return redacted
+    try:
+        decoded = json.loads(redacted)
+    except (json.JSONDecodeError, RecursionError, TypeError, ValueError):
+        return redacted
+    if not isinstance(decoded, (dict, list)):
+        return redacted
+    try:
+        sanitized = _sanitize_payload(decoded, depth + 1)
+    except RecursionError:
+        return _PRESIGNED_URL_MARKER if redacted != value else redacted
+    if sanitized == decoded and redacted == value:
+        return value
+    return json.dumps(
+        sanitized,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def _sanitize_payload(value: Any, depth: int = 0) -> Any:
     if isinstance(value, Mapping):
         return {
-            str(key): _sanitize_payload(item)
+            str(key): _sanitize_payload(item, depth)
             for key, item in value.items()
             if not _is_sensitive_key(str(key))
         }
     if isinstance(value, (list, tuple)):
-        return [_sanitize_payload(item) for item in value]
+        return [_sanitize_payload(item, depth) for item in value]
     if isinstance(value, float):
         return value if math.isfinite(value) else None
-    if isinstance(value, (str, bool, int)) or value is None:
+    if isinstance(value, str):
+        return _sanitize_string_payload(value, depth)
+    if isinstance(value, (bool, int)) or value is None:
         return value
     return str(value)
 

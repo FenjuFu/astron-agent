@@ -10,6 +10,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 
+import java.nio.charset.StandardCharsets;
+
 /**
  * Spring AI tool wrapping the managed web search (Spark X1 deep web search). Returns the
  * summarized, citation-tagged answer as the tool result and records the search trace into
@@ -50,17 +52,23 @@ public class WebSearchToolCallback implements ToolCallback {
                     query = args.getString("query");
                 }
             } catch (Exception e) {
-                log.warn("Failed to parse web_search tool input as JSON: {}", toolInput);
+                log.warn(
+                        "Failed to parse web_search tool input as JSON, inputBytes={}, errorType={}",
+                        toolInput.getBytes(StandardCharsets.UTF_8).length,
+                        e.getClass().getSimpleName());
             }
         }
         if (StringUtils.isBlank(query)) {
             return "No query provided.";
         }
-        log.info("web_search tool invoked, userId={}, query={}", context.getUserId(), query);
+        log.info(
+                "web_search tool invoked, userId={}, queryBytes={}",
+                context.getUserId(),
+                query.getBytes(StandardCharsets.UTF_8).length);
 
         SearchAugmentation result = managedWebSearchService.search(query, context.getUserId());
         if (result.failed()) {
-            return "Web search failed: " + StringUtils.defaultString(result.errorMessage());
+            return "Web search failed.";
         }
         JSONArray toolCalls;
         try {

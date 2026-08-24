@@ -122,7 +122,12 @@ public class DataPermissionCheckTool {
      */
     private void deny(String action, Object resource) {
         String uid = UserInfoManagerHandler.getUserId();
-        log.warn("Permission check failed: action={}, uid={}, resource={}", action, uid, resource);
+        log.warn(
+                "Permission check failed: action={}, uid={}, currentSpaceId={}, resourceType={}",
+                action,
+                uid,
+                currentSpaceId(),
+                resource == null ? null : resource.getClass().getSimpleName());
         throw new BusinessException(ResponseEnum.EXCEED_AUTHORITY);
     }
 
@@ -299,7 +304,8 @@ public class DataPermissionCheckTool {
     }
 
     /**
-     * Check workflow ownership (space first, then user; public allowed).
+     * Check strict workflow ownership for mutations and top-level execution. Public visibility and
+     * administrator-owned resources never grant write access.
      *
      * @param workflow the workflow to check
      * @param spaceId the space ID context
@@ -311,18 +317,16 @@ public class DataPermissionCheckTool {
         String uid = getThreadLocalUidNoNull();
 
         boolean noPermission = (spaceId == null)
-                ? (!Boolean.TRUE.equals(workflow.getIsPublic())
-                        && !Objects.equals(workflow.getUid(), uid)
-                        && !isAdmin(workflow.getUid()))
-                : (!Boolean.TRUE.equals(workflow.getIsPublic())
-                        && !Objects.equals(workflow.getSpaceId(), spaceId));
+                ? (workflow.getSpaceId() != null || !Objects.equals(workflow.getUid(), uid))
+                : !hasWorkflowSpaceAccess(workflow, spaceId);
 
         if (noPermission)
             deny("checkWorkflowBelong", workflow);
     }
 
     /**
-     * Check workflow visibility (same strategy as ownership).
+     * Check workflow visibility. Space-bound workflows always require the matching space context and
+     * active membership; personal workflows retain public/owner/admin visibility.
      *
      * @param workflow the workflow to check
      * @param spaceId the space ID context
@@ -333,21 +337,15 @@ public class DataPermissionCheckTool {
             throw new BusinessException(ResponseEnum.DATA_NOT_EXIST);
         String uid = getThreadLocalUidNoNull();
 
-        boolean noPermission = (spaceId == null)
-                ? (!Boolean.TRUE.equals(workflow.getIsPublic())
-                        && !Objects.equals(workflow.getUid(), uid)
-                        && !isAdmin(workflow.getUid()))
-                : (!Boolean.TRUE.equals(workflow.getIsPublic())
-                        && !Objects.equals(workflow.getSpaceId(), spaceId));
-
-        if (noPermission)
+        if (!hasBaseWorkflowVisibility(workflow, spaceId, uid))
             deny("checkWorkflowVisible", workflow);
     }
 
     /**
      * Workflow detail visibility:
      * <ul>
-     * <li>Allow public/owner/admin;</li>
+     * <li>Require matching membership for space-bound workflows;</li>
+     * <li>Allow public/owner/admin personal workflows;</li>
      * <li>If bound to AIUI agent and listed on market (market flag=true), also allow;</li>
      * </ul>
      * <p>
@@ -364,15 +362,7 @@ public class DataPermissionCheckTool {
             throw new BusinessException(ResponseEnum.DATA_NOT_EXIST);
         String uid = getThreadLocalUidNoNull();
 
-        // Public/owner/admin evaluation first
-        boolean baseDenied = (spaceId == null)
-                ? (!Boolean.TRUE.equals(workflow.getIsPublic())
-                        && !Objects.equals(workflow.getUid(), uid)
-                        && !isAdmin(workflow.getUid()))
-                : (!Boolean.TRUE.equals(workflow.getIsPublic())
-                        && !Objects.equals(workflow.getSpaceId(), spaceId));
-
-        if (!baseDenied)
+        if (hasBaseWorkflowVisibility(workflow, spaceId, uid))
             return;
 
         // Try to parse botId from ext and check "whether on market"
@@ -383,8 +373,11 @@ public class DataPermissionCheckTool {
                 JSONObject obj = JSON.parseObject(ext);
                 botId = obj.getInteger("botId");
             } catch (JSONException e) {
-                log.warn("Invalid workflow.ext JSON, cannot extract botId. flowId={}, extSnippet={}",
-                        workflow.getFlowId(), org.apache.commons.lang3.StringUtils.abbreviate(ext, 64), e);
+                log.warn(
+                        "Invalid workflow.ext JSON, cannot extract botId, flowId={}, bodyBytes={}, errorType={}",
+                        workflow.getFlowId(),
+                        ext.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                        e.getClass().getSimpleName());
                 botId = null;
             }
         } else {
@@ -403,6 +396,24 @@ public class DataPermissionCheckTool {
         if (!onMarket) {
             deny("checkWorkflowVisibleForDetail", workflow);
         }
+    }
+
+    private boolean hasBaseWorkflowVisibility(Workflow workflow, Long spaceId, String uid) {
+        if (workflow.getSpaceId() != null) {
+            return hasWorkflowSpaceAccess(workflow, spaceId);
+        }
+        if (spaceId != null) {
+            return Boolean.TRUE.equals(workflow.getIsPublic());
+        }
+        return Boolean.TRUE.equals(workflow.getIsPublic())
+                || Objects.equals(workflow.getUid(), uid)
+                || isAdmin(workflow.getUid());
+    }
+
+    private boolean hasWorkflowSpaceAccess(Workflow workflow, Long spaceId) {
+        return Objects.equals(workflow.getSpaceId(), spaceId)
+                && Objects.equals(spaceId, SpaceInfoUtil.getSpaceId())
+                && SpaceInfoUtil.checkUserBelongSpace();
     }
 
     // ===================== Optimization Task / Evaluation Dimension/Scenario / DB

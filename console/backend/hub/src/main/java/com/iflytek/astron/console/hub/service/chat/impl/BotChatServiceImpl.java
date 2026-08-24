@@ -502,7 +502,10 @@ public class BotChatServiceImpl implements BotChatService {
         try {
             array = JSON.parseArray(skillsJson);
         } catch (Exception e) {
-            log.warn("Invalid skills json on bot: {}", skillsJson);
+            log.warn(
+                    "Invalid skills json on bot, bodyBytes={}, errorType={}",
+                    skillsJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                    e.getClass().getSimpleName());
             return List.of();
         }
         skillEnrichmentService.enrichSkillEntries(array);

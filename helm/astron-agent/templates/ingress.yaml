@@ -1,4 +1,11 @@
 {{- if .Values.ingress.enabled -}}
+{{- $consoleApiPath := "/console-api(/|$)(.*)" -}}
+{{- $gatewayAuthDenyPath := "/console-api/internal/gateway/auth/workflow(/|$)(.*)" -}}
+{{- $artifactUploadDenyPath := "/console-api/workflow/artifacts/internal-upload(/|$)(.*)" -}}
+{{- $runtimeConfigDenyPath := "/console-api/skill-sandbox/internal-runtime-config(/|$)(.*)" -}}
+{{- if or (le (len $gatewayAuthDenyPath) (len $consoleApiPath)) (le (len $artifactUploadDenyPath) (len $consoleApiPath)) (le (len $runtimeConfigDenyPath) (len $consoleApiPath)) -}}
+{{- fail "internal console API deny paths must remain longer than the generic /console-api regex so ingress-nginx orders them first" -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -14,11 +21,6 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-body-size: "20m"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
-    # Security headers
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      add_header X-Frame-Options "SAMEORIGIN" always;
-      add_header X-XSS-Protection "1; mode=block" always;
-      add_header X-Content-Type-Options "nosniff" always;
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -50,6 +52,7 @@ spec:
                 port:
                   number: {{ $.Values.consoleFrontend.service.port }}
     {{- end }}
+{{- if .Values.consoleHub.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -68,11 +71,6 @@ metadata:
     nginx.ingress.kubernetes.io/auth-url: "http://{{ include "astron-agent.fullname" . }}-console-hub.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.consoleHub.service.port }}/internal/gateway/auth/workflow"
     nginx.ingress.kubernetes.io/auth-method: "GET"
     nginx.ingress.kubernetes.io/auth-response-headers: "X-Consumer-Username"
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      proxy_set_header Authorization "";
-      add_header X-Frame-Options "SAMEORIGIN" always;
-      add_header X-XSS-Protection "1; mode=block" always;
-      add_header X-Content-Type-Options "nosniff" always;
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -127,10 +125,6 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-body-size: "20m"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      add_header X-Frame-Options "SAMEORIGIN" always;
-      add_header X-XSS-Protection "1; mode=block" always;
-      add_header X-Content-Type-Options "nosniff" always;
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -168,14 +162,6 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-body-size: "20m"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      add_header X-Frame-Options "SAMEORIGIN" always;
-      add_header X-XSS-Protection "1; mode=block" always;
-      add_header X-Content-Type-Options "nosniff" always;
-    nginx.ingress.kubernetes.io/server-snippet: |
-      location = /console-api/internal/gateway/auth/workflow {
-        return 404;
-      }
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -188,7 +174,31 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
-          - path: /console-api(/|$)(.*)
+          # ingress-nginx sorts regex locations by descending path length. These
+          # service-only paths are deliberately longer than the generic route and
+          # terminate at a selectorless Service with no endpoints (HTTP 503).
+          - path: {{ $gatewayAuthDenyPath | quote }}
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ include "astron-agent.fullname" $ }}-console-api-deny
+                port:
+                  number: 80
+          - path: {{ $artifactUploadDenyPath | quote }}
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ include "astron-agent.fullname" $ }}-console-api-deny
+                port:
+                  number: 80
+          - path: {{ $runtimeConfigDenyPath | quote }}
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ include "astron-agent.fullname" $ }}-console-api-deny
+                port:
+                  number: 80
+          - path: {{ $consoleApiPath | quote }}
             pathType: ImplementationSpecific
             backend:
               service:
@@ -196,4 +206,5 @@ spec:
                 port:
                   number: {{ $.Values.consoleHub.service.port }}
     {{- end }}
+{{- end }}
 {{- end }}

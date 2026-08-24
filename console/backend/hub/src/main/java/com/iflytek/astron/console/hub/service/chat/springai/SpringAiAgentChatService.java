@@ -25,6 +25,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +44,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 @Service
 public class SpringAiAgentChatService {
+
+    private static final String SAFE_CHAT_FAILURE = "Failed to process chat request";
 
     private final ChatModelFactory chatModelFactory;
     private final AgentToolCallbackResolver toolCallbackResolver;
@@ -76,9 +79,17 @@ public class SpringAiAgentChatService {
 
             List<ToolCallback> tools = toolCallbackResolver.resolve(task.getOpenedTool(), task.getMcpServerUrls(),
                     task.getSkills(), task.getTools(), task.getWorkflows(), context);
-            log.info("Agent chat start, streamId={}, modelId={}, spark={}, toolCount={}, openedTool={}, mcpServerUrls={}, tools={}, workflows={}",
-                    streamId, agentModel.modelId(), task.getLlmInfoVo() == null, tools.size(), task.getOpenedTool(),
-                    task.getMcpServerUrls(), task.getTools(), task.getWorkflows());
+            log.info(
+                    "Agent chat start, streamId={}, modelId={}, spark={}, toolCount={}, skillCount={}, openedToolBytes={}, mcpConfigBytes={}, savedToolConfigBytes={}, workflowConfigBytes={}",
+                    streamId,
+                    agentModel.modelId(),
+                    task.getLlmInfoVo() == null,
+                    tools.size(),
+                    task.getSkills() == null ? 0 : task.getSkills().size(),
+                    utf8Length(task.getOpenedTool()),
+                    utf8Length(task.getMcpServerUrls()),
+                    utf8Length(task.getTools()),
+                    utf8Length(task.getWorkflows()));
 
             OpenAiChatOptions options = OpenAiChatOptions.builder()
                     .model(agentModel.modelId())
@@ -117,8 +128,11 @@ public class SpringAiAgentChatService {
                                 scheduleMemoryWrite(task, bridge.getFinalResult().toString());
                             });
         } catch (Exception e) {
-            log.error("Spring AI agent chat setup failed, streamId: {}", streamId, e);
-            SseEmitterUtil.completeWithError(emitter, "Failed to process chat request: " + e.getMessage());
+            log.error(
+                    "Spring AI agent chat setup failed, streamId={}, errorType={}",
+                    streamId,
+                    e.getClass().getSimpleName());
+            SseEmitterUtil.completeWithError(emitter, safeFailureMessage(streamId));
         }
     }
 
@@ -128,8 +142,11 @@ public class SpringAiAgentChatService {
                     () -> agentMemoryRuntimeService.writeTurn(task, assistantAnswer),
                     agentMemoryExecutor)
                     .exceptionally(error -> {
-                        log.warn("Agent memory async write failed, botId={}, uid={}, err={}",
-                                task.getBotId(), task.getUserId(), error.getMessage());
+                        log.warn(
+                                "Agent memory async write failed, botId={}, uid={}, errorType={}",
+                                task.getBotId(),
+                                task.getUserId(),
+                                error.getClass().getSimpleName());
                         return null;
                     });
         } catch (RejectedExecutionException e) {
@@ -141,18 +158,36 @@ public class SpringAiAgentChatService {
     private void handleStreamError(Throwable e, SseEmitter emitter, String streamId, AgentChatTask task,
             AgentSseBridge bridge) {
         if (e instanceof WebClientResponseException w) {
-            log.error("Spring AI agent chat failed (HTTP {}), streamId: {}, responseBody: {}", w.getStatusCode(),
-                    streamId, w.getResponseBodyAsString(), e);
+            log.error(
+                    "Spring AI agent chat failed, streamId={}, httpStatus={}, errorType={}",
+                    streamId,
+                    w.getStatusCode().value(),
+                    e.getClass().getSimpleName());
         } else {
-            log.error("Spring AI agent chat failed, streamId: {}", streamId, e);
+            log.error(
+                    "Spring AI agent chat failed, streamId={}, httpStatus={}, errorType={}",
+                    streamId,
+                    null,
+                    e.getClass().getSimpleName());
         }
         // Persist whatever was generated before the error so the partial reply is not lost.
         try {
             persist(task, bridge);
         } catch (Exception persistError) {
-            log.error("Failed to persist partial response after stream error, streamId: {}", streamId, persistError);
+            log.error(
+                    "Failed to persist partial response after stream error, streamId={}, errorType={}",
+                    streamId,
+                    persistError.getClass().getSimpleName());
         }
-        SseEmitterUtil.completeWithError(emitter, "Failed to process chat request: " + e.getMessage());
+        SseEmitterUtil.completeWithError(emitter, safeFailureMessage(streamId));
+    }
+
+    private String safeFailureMessage(String streamId) {
+        return SAFE_CHAT_FAILURE + " (streamId: " + StringUtils.defaultString(streamId, "unknown") + ")";
+    }
+
+    private int utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(StandardCharsets.UTF_8).length;
     }
 
     private void emitChunk(ChatResponse response, AgentSseBridge bridge) {

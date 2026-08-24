@@ -5,9 +5,12 @@ Reuses the audited ``E2BSandboxProvider`` so the Java standalone-agent runtime
 v1 returns only exit_code/stdout/stderr; artifact collection/upload is skipped.
 """
 
+import hashlib
+import hmac
+import time
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from agent.service.plugin.skill import SkillResource
@@ -16,9 +19,13 @@ from agent.service.plugin.skill_sandbox import (
     E2BSandboxProvider,
     SandboxExecutionRequest,
     SkillSandboxConfig,
+    _load_runtime_credential_token,
 )
 
 skill_sandbox_router = APIRouter()
+EXECUTION_TIMESTAMP_HEADER = "X-Skill-Sandbox-Execution-Timestamp"
+EXECUTION_SIGNATURE_HEADER = "X-Skill-Sandbox-Execution-Signature"
+EXECUTION_SIGNATURE_MAX_AGE_SECONDS = 300
 
 
 class SandboxExecBody(BaseModel):
@@ -39,16 +46,46 @@ class SandboxExecResponse(BaseModel):
 
 def _build_config(raw: dict[str, Any]) -> SkillSandboxConfig:
     return SkillSandboxConfig(
-        provider=str(raw.get("provider") or "e2b").strip().lower(),
         enabled=bool(raw.get("enabled")),
-        api_key=str(raw.get("api_key") or raw.get("apiKey") or ""),
-        timeout_seconds=int(
-            raw.get("timeout_seconds") or raw.get("timeoutSeconds") or 60
+        workflow_id=str(
+            raw.get("workflow_id") or raw.get("workflowId") or raw.get("flowId") or ""
         ),
-        allow_internet_access=bool(
-            raw.get("allow_internet_access") or raw.get("allowInternetAccess")
-        ),
+        uid=str(raw.get("uid") or ""),
+        space_id=str(raw.get("space_id") or raw.get("spaceId") or ""),
     )
+
+
+def _verify_execution_signature(
+    raw_body: bytes,
+    timestamp_value: str | None,
+    signature_value: str | None,
+    *,
+    now_seconds: int | None = None,
+) -> None:
+    try:
+        if (
+            timestamp_value is None
+            or not timestamp_value.isascii()
+            or not timestamp_value.isdigit()
+            or not 1 <= len(timestamp_value) <= 20
+            or signature_value is None
+            or len(signature_value) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in signature_value)
+        ):
+            raise ValueError
+        timestamp = int(timestamp_value)
+        now = int(time.time()) if now_seconds is None else now_seconds
+        if abs(now - timestamp) > EXECUTION_SIGNATURE_MAX_AGE_SECONDS:
+            raise ValueError
+        token = _load_runtime_credential_token()
+        canonical = timestamp_value.encode("ascii") + b"\n" + raw_body
+        expected = hmac.new(
+            token.encode("utf-8"), canonical, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expected, signature_value.lower()):
+            raise ValueError
+    except Exception:
+        raise HTTPException(status_code=401, detail="Unauthorized") from None
 
 
 @skill_sandbox_router.post(  # type: ignore[misc]
@@ -56,9 +93,14 @@ def _build_config(raw: dict[str, Any]) -> SkillSandboxConfig:
     description="Execute a single skill command in the E2B sandbox (no artifact handling).",
     response_model=SandboxExecResponse,
 )
-async def sandbox_exec(body: SandboxExecBody) -> SandboxExecResponse:
+async def sandbox_exec(body: SandboxExecBody, request: Request) -> SandboxExecResponse:
+    _verify_execution_signature(
+        await request.body(),
+        request.headers.get(EXECUTION_TIMESTAMP_HEADER),
+        request.headers.get(EXECUTION_SIGNATURE_HEADER),
+    )
     config = _build_config(body.sandbox)
-    configured = config.enabled and config.provider == "e2b" and bool(config.api_key)
+    configured = config.enabled
     if not configured:
         return SandboxExecResponse(
             configured=False, message=SCRIPT_SANDBOX_UNCONFIGURED_MESSAGE

@@ -97,6 +97,24 @@ class WorkflowAgentRunnerBuilder(BaseApiBuilder):
             sandbox = skill.get("sandbox")
             if not isinstance(sandbox, dict) or not sandbox:
                 continue
+            for untrusted_key in (
+                "provider",
+                "apiKey",
+                "api_key",
+                "timeoutSeconds",
+                "timeout_seconds",
+                "allowInternetAccess",
+                "allow_internet_access",
+                "runtimeConfigUrl",
+                "runtime_config_url",
+                "artifactUploadUrl",
+                "artifact_upload_url",
+                "artifactUploadToken",
+                "artifact_upload_token",
+                "runtimeCredentialToken",
+                "runtime_credential_token",
+            ):
+                sandbox.pop(untrusted_key, None)
             sandbox["uid"] = self.inputs.uid
             sandbox["workflow_id"] = self.inputs.meta_data.workflow_id
             sandbox["run_id"] = (

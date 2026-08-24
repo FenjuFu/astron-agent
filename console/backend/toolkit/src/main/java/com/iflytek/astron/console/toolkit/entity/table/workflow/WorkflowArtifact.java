@@ -34,6 +34,9 @@ public class WorkflowArtifact implements Serializable {
 
     private String objectKey;
 
+    /** Null identifies legacy artifacts stored in the shared console bucket. */
+    private String bucketName;
+
     private String contentType;
 
     private Long fileSize;

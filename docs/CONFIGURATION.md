@@ -45,7 +45,12 @@ Configuration items in this document are marked as follows:
 >   - MySQL related: `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_URL`, etc.
 >   - Redis related: `REDIS_ADDR`, `REDIS_HOST`, `REDIS_PASSWORD`, `REDIS_PORT`, etc.
 >   - Kafka related: `KAFKA_SERVERS` and authentication information (if needed)
->   - MinIO related: `OSS_ENDPOINT`, `OSS_DOWNLOAD_HOST`, `OSS_ACCESS_KEY_ID`, `OSS_SECRET_KEY`, etc.
+>   - MinIO related: `OSS_ENDPOINT`, `OSS_DOWNLOAD_HOST`, `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, etc.
+>
+> **MinIO security defaults**:
+> - Docker Compose has no built-in MinIO credential. Set a unique `MINIO_ROOT_USER`/`OSS_ACCESS_KEY_ID` (at least 8 characters) and random `MINIO_ROOT_PASSWORD`/`OSS_ACCESS_KEY_SECRET` (at least 16 characters). Empty, short, placeholder, and well-known default values are rejected before MinIO starts.
+> - The bundled MinIO API and administrative console bind only to `127.0.0.1` on the host. Application containers use the configured API port over the private Compose network; `minio.localhost` gives local browsers and containers one identical signed hostname. Remote access must be an explicit decision through a separately protected TLS proxy; do not publish MinIO directly to an untrusted network.
+> - The Helm chart does not render MinIO credentials. Pre-create `minio.auth.existingSecret`; the bundled API and console Services default to separate `ClusterIP` Services. `NodePort`/`LoadBalancer` exposure is opt-in, and exposing the API never implicitly exposes the console.
 
 | Variable Name | Configuration Type | Type | Description | Example Value |
 |---------------|-------------------|------|-------------|---------------|
@@ -74,17 +79,31 @@ Configuration items in this document are marked as follows:
 | KAFKA_CLUSTER_ID | Use Default | string | Kafka cluster ID | MkU3OEVBNTcwNTJENDM2Qk |
 | KAFKA_TIMEOUT | Use Default | int | Kafka connection timeout (seconds) | 60 |
 | KAFKA_SERVERS | Use Default | string | Kafka server address list | kafka:29092 |
-| MINIO_ROOT_USER | Use Default | string | MinIO administrator username | minioadmin |
-| MINIO_ROOT_PASSWORD | Use Default | string | MinIO administrator password | minioadmin123 |
-| EXPOSE_MINIO_PORT | Use Default | int | MinIO API externally exposed port number | 18998 |
-| EXPOSE_MINIO_CONSOLE_PORT | Use Default | int | MinIO console externally exposed port number | 18999 |
+| MINIO_ROOT_USER | User Required | string | Unique MinIO administrator username; at least 8 characters, with no built-in default | (no default) |
+| MINIO_ROOT_PASSWORD | User Required | string | Random MinIO administrator password; at least 16 characters, with no built-in default | (no default) |
+| EXPOSE_MINIO_PORT | Use Default | int | Host loopback-only MinIO API maintenance port (`127.0.0.1` binding is fixed by Compose) | 18998 |
+| EXPOSE_MINIO_CONSOLE_PORT | Use Default | int | Host loopback-only MinIO console maintenance port (`127.0.0.1` binding is fixed by Compose) | 18999 |
 | OSS_TYPE | Use Default | string | Object storage type (s3/oss/obs, etc.) | s3 |
-| OSS_ENDPOINT | Use Default | url | Object storage service endpoint address | http://minio:9000 |
-| OSS_ACCESS_KEY_ID | Use Default | string | Object storage access key ID | ${MINIO_ROOT_USER:-minioadmin} |
-| OSS_ACCESS_KEY_SECRET | Use Default | string | Object storage access key Secret | ${MINIO_ROOT_PASSWORD:-minioadmin123} |
+| OSS_ENDPOINT | Use Default | url | Object storage service endpoint address | http://minio:${EXPOSE_MINIO_PORT} |
+| OSS_ACCESS_KEY_ID | User Required | string | Explicit object-storage access key ID; normally the configured MinIO user for the bundled service | ${MINIO_ROOT_USER} |
+| OSS_ACCESS_KEY_SECRET | User Required | string | Explicit random object-storage access key secret | ${MINIO_ROOT_PASSWORD} |
 | OSS_BUCKET_NAME | Use Default | string | Object storage bucket name | workflow |
 | OSS_TTL | Use Default | int | Object storage URL validity period (seconds) | 157788000 |
-| OSS_DOWNLOAD_HOST | Use Default | url | Object storage download access address | http://minio:9000 |
+| OSS_DOWNLOAD_HOST | Use Default | url | Endpoint embedded in download URLs; `minio.localhost` resolves to host loopback for local browsers and to MinIO's private-network alias for containers, preserving the signed Host | http://minio.localhost:${EXPOSE_MINIO_PORT} |
+
+### Helm MinIO Security Settings
+
+| Value | Configuration Type | Description | Default / Example |
+|-------|--------------------|-------------|-------------------|
+| `minio.auth.existingSecret` | Required | Pre-created Secret shared by MinIO and all in-chart S3 consumers; the chart never renders its credential values | `astron-agent-minio-credentials` |
+| `minio.auth.rootUserKey` | Required | Secret key containing the MinIO/S3 access key | `root-user` |
+| `minio.auth.rootPasswordKey` | Required | Secret key containing the MinIO/S3 secret key | `root-password` |
+| `minio.auth.existingSecretChecksum` | Optional | Non-secret rotation marker; update it to roll all consumers after rotating the Secret in place | (empty) |
+| `minio.service.type` | Use Default | Bundled MinIO API Service type; external exposure is explicit opt-in | `ClusterIP` |
+| `minio.consoleService.type` | Use Default | Separate MinIO console Service type; it is never exposed merely because the API is exposed | `ClusterIP` |
+| `minio.publicEndpoint` | Conditional | Exact client-facing origin (scheme, host, optional port; no path/query/fragment) for presigned/download URLs; also injected into Core Agent as `SKILL_RESOURCE_TRUSTED_ORIGIN`; configuring it does not create an Ingress or expose a Service | (empty; internal endpoint) |
+| `minio.external.endpoint` | Conditional | Internal S3-compatible endpoint required when `minio.enabled=false` and an enabled service uses object storage | `https://s3.internal.example.com` |
+| `minio.external.publicEndpoint` | Optional | Client-facing endpoint for an external S3-compatible service | `https://objects.example.com` |
 
 ---
 
@@ -208,6 +227,8 @@ See the [Langfuse observability guide](/guide/observability) for privacy behavio
 | APP_AUTH_PROT | Required | string | Application authentication service protocol (http/https) | http |
 | APP_AUTH_API_KEY | Required | string | Application authentication API Key | 7b709739e8da44536127a333c7603a83 |
 | APP_AUTH_SECRET | Required | string | Application authentication Secret | NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy |
+| SKILL_RESOURCE_TRUSTED_ORIGIN | Derived | url origin | Only remote origin from which Core Agent may fetch Skill resources; Compose derives it from `OSS_REMOTE_ENDPOINT`, Helm from `minio.publicEndpoint`/the effective MinIO public endpoint; no other URL origin is trusted | http://minio.localhost:${EXPOSE_MINIO_PORT} |
+| SKILL_RESOURCE_TRUSTED_BUCKET | Derived | string | Only bucket accepted for remote Skill resources; Compose/Helm derive it from `OSS_BUCKET_CONSOLE`/`consoleHub.env.ossBucketConsole`, and Core Agent additionally restricts keys to `skill-files/` with complete SigV4 parameters | console-oss |
 
 ---
 
@@ -245,7 +266,7 @@ See the [Langfuse observability guide](/guide/observability) for privacy behavio
 |---------------|-------------------|------|-------------|---------------|
 | HOST_BASE_ADDRESS | User Required | url | Host base address | http://localhost |
 | CONSOLE_DOMAIN | Required | url | Console domain address (defaults from HOST_BASE_ADDRESS and EXPOSE_NGINX_PORT) | ${HOST_BASE_ADDRESS}:${EXPOSE_NGINX_PORT} |
-| OSS_REMOTE_ENDPOINT | Required | url | Object storage remote endpoint address (defaults from HOST_BASE_ADDRESS and EXPOSE_MINIO_PORT) | ${HOST_BASE_ADDRESS}:${EXPOSE_MINIO_PORT} |
+| OSS_REMOTE_ENDPOINT | Required | url origin | Exact origin embedded in Console presigned URLs and trusted by Core Agent; the local default is reachable with the same signed Host from both the Docker host and Compose containers; remote clients require a separately protected TLS endpoint | http://minio.localhost:${EXPOSE_MINIO_PORT} |
 | OSS_BUCKET_CONSOLE | Required | string | Object storage bucket name used by Console | console-oss |
 | OSS_PRESIGN_EXPIRY_SECONDS_CONSOLE | Required | int | Console presigned URL expiration time (seconds) | 600 |
 | REDIS_DATABASE_CONSOLE | Required | int | Redis database index used by Console | 1 |

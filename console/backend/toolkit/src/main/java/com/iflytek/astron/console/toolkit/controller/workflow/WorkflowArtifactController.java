@@ -43,7 +43,7 @@ public class WorkflowArtifactController {
 
     @PostMapping("/artifacts/internal-upload")
     public ApiResult<WorkflowArtifactDto> uploadInternal(
-            @RequestHeader(value = "X-Skill-Sandbox-Artifact-Token", required = false) String token,
+            @RequestHeader("X-Skill-Sandbox-Artifact-Token") String token,
             @RequestParam(value = "workflowId", required = false) Long workflowId,
             @RequestParam(value = "flowId", required = false) String flowId,
             @RequestParam("uid") String uid,

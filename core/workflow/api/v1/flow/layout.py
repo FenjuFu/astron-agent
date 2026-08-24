@@ -40,6 +40,10 @@ from workflow.extensions.middleware.getters import get_cache_service, get_sessio
 from workflow.extensions.otlp.metric.meter import Meter
 from workflow.extensions.otlp.trace.span import Span
 from workflow.service import app_service, flow_service
+from workflow.utils.protocol_sanitization import (
+    sanitize_protocol,
+    sanitize_protocol_document_for_use,
+)
 
 router = APIRouter(tags=["Flows"])
 
@@ -77,11 +81,14 @@ async def add(
             if flow.data:
                 try:
                     await current_span.add_info_event_async("Protocol validation start")
-                    sparkflow_protocol = flow.data
+                    sparkflow_protocol = sanitize_protocol_document_for_use(
+                        db_flow.data
+                    )
                     if isinstance(sparkflow_protocol, str):
                         sparkflow_protocol = json.loads(sparkflow_protocol)
                     WorkflowEngineFactory.create_engine(
-                        WorkflowDSL.model_validate(flow.data.get("data")), current_span
+                        WorkflowDSL.model_validate(sparkflow_protocol.get("data")),
+                        current_span,
                     )
                     await current_span.add_info_event_async("Protocol validation end")
                 except ValidationError as err:
@@ -160,12 +167,12 @@ async def update(
         try:
             await current_span.add_info_event_async(f"update start: {flow_id}")
             del_flow_by_id(flow_id)
-            sparkflow_protocol = flow.data
+            sparkflow_protocol = sanitize_protocol_document_for_use(flow.data)
             if sparkflow_protocol:
                 if isinstance(sparkflow_protocol, str):
                     sparkflow_protocol = json.loads(sparkflow_protocol)
                 WorkflowEngineFactory.create_engine(
-                    WorkflowDSL.model_validate((flow.data or {}).get("data")),
+                    WorkflowDSL.model_validate(sparkflow_protocol.get("data")),
                     current_span,
                 )
             db_flow = session.query(Flow).filter_by(id=int(flow_id)).first()
@@ -345,7 +352,7 @@ def save_comparisons(
             comparison_data = Flow(
                 group_id=db_flow.group_id,
                 name=db_flow.name,
-                data=chat_input.data,
+                data=sanitize_protocol(chat_input.data),
                 description=db_flow.description,
                 app_id=db_flow.app_id,
                 source=db_flow.source,

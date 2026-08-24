@@ -4,19 +4,24 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.iflytek.astron.console.commons.constant.ResponseEnum;
+import com.iflytek.astron.console.commons.entity.workflow.Workflow;
 import com.iflytek.astron.console.commons.exception.BusinessException;
 import com.iflytek.astron.console.commons.service.space.SpaceUserService;
 import com.iflytek.astron.console.commons.util.space.SpaceInfoUtil;
 import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxConfigDto;
+import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxRuntimeCredentialDto;
+import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxRuntimeRefDto;
 import com.iflytek.astron.console.toolkit.entity.table.skill.SkillSandboxConfig;
 import com.iflytek.astron.console.toolkit.entity.vo.skill.SkillSandboxConfigReq;
 import com.iflytek.astron.console.toolkit.handler.UserInfoManagerHandler;
 import com.iflytek.astron.console.toolkit.mapper.skill.SkillSandboxConfigMapper;
+import com.iflytek.astron.console.toolkit.mapper.workflow.WorkflowMapper;
+import com.iflytek.astron.console.toolkit.security.SandboxRuntimeCredentialTokenProvider;
 import jakarta.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,14 +33,14 @@ public class SkillSandboxConfigService
     private static final String PROVIDER_E2B = "e2b";
     private static final int DEFAULT_TIMEOUT_SECONDS = 60;
 
-    @Value("${skill.sandbox.artifact-upload-url:http://console-hub:8080/workflow/artifacts/internal-upload}")
-    private String artifactUploadUrl;
-
-    @Value("${skill.sandbox.artifact-upload-token:}")
-    private String artifactUploadToken;
-
     @Resource
     private SpaceUserService spaceUserService;
+
+    @Resource
+    private WorkflowMapper workflowMapper;
+
+    @Resource
+    private SandboxRuntimeCredentialTokenProvider runtimeCredentialTokenProvider;
 
     public SkillSandboxConfigDto getMaskedConfig() {
         return toDto(getScopedConfig(), false);
@@ -101,24 +106,86 @@ public class SkillSandboxConfigService
         return dto;
     }
 
-    public SkillSandboxConfigDto toRuntimeDto() {
-        return toRuntimeDto(currentUid(), currentSpaceId());
+    public SkillSandboxRuntimeRefDto toRuntimeRefDto() {
+        return toRuntimeRefDto(currentUid(), currentSpaceId());
     }
 
-    /** Resolve the runtime sandbox without relying on servlet request context. */
-    public SkillSandboxConfigDto toRuntimeDto(String uid, Long spaceId) {
+    /** Resolve a non-secret runtime reference without relying on servlet request context. */
+    public SkillSandboxRuntimeRefDto toRuntimeRefDto(String uid, Long spaceId) {
         SkillSandboxConfig config = getActiveConfig(uid, spaceId);
-        SkillSandboxConfigDto dto = toDto(config, true);
-        if (config != null) {
-            dto.setArtifactUploadUrl(StringUtils.trimToEmpty(artifactUploadUrl));
-            dto.setArtifactUploadToken(StringUtils.trimToEmpty(artifactUploadToken));
-            dto.setSpaceId(spaceId);
-        }
+        SkillSandboxRuntimeRefDto dto = new SkillSandboxRuntimeRefDto();
+        dto.setProvider(PROVIDER_E2B);
+        dto.setEnabled(config != null);
+        dto.setUid(uid);
+        dto.setSpaceId(spaceId);
         return dto;
+    }
+
+    /**
+     * Resolve the E2B credential only for the authenticated private broker. A workflow reference
+     * derives scope from the database; standalone agent calls must provide a currently authorized
+     * uid/space pair.
+     */
+    public SkillSandboxRuntimeCredentialDto getRuntimeCredential(
+            String serviceToken, String flowId, String uid, Long spaceId) {
+        if (runtimeCredentialTokenProvider == null
+                || !runtimeCredentialTokenProvider.matches(serviceToken)) {
+            throw new BusinessException(ResponseEnum.UNAUTHORIZED);
+        }
+        assertExplicitScope(uid, spaceId);
+        SkillSandboxConfig config;
+        if (StringUtils.isNotBlank(flowId)) {
+            List<Workflow> workflows = workflowMapper.selectList(
+                    Wrappers.lambdaQuery(Workflow.class)
+                            .eq(Workflow::getFlowId, StringUtils.trim(flowId))
+                            .eq(Workflow::getDeleted, Boolean.FALSE)
+                            .last("limit 2"));
+            if (workflows == null || workflows.size() != 1) {
+                throw new BusinessException(ResponseEnum.WORKFLOW_NOT_EXIST);
+            }
+            Workflow workflow = workflows.getFirst();
+            assertWorkflowExecutionScope(workflow, uid, spaceId);
+            config = getActiveConfigForTrustedScope(workflow.getUid(), workflow.getSpaceId());
+        } else {
+            config = getActiveConfigForTrustedScope(uid, spaceId);
+        }
+        if (config == null) {
+            throw new BusinessException(ResponseEnum.DATA_NOT_EXIST);
+        }
+        return new SkillSandboxRuntimeCredentialDto(
+                normalizeProvider(config.getProvider()),
+                config.getApiKey(),
+                normalizeTimeout(config.getTimeoutSeconds()),
+                Boolean.TRUE.equals(config.getAllowInternetAccess()));
+    }
+
+    private void assertWorkflowExecutionScope(Workflow workflow, String uid, Long spaceId) {
+        if (workflow.getSpaceId() == null) {
+            if (spaceId != null || !StringUtils.equals(workflow.getUid(), uid)) {
+                throw new BusinessException(ResponseEnum.INSUFFICIENT_PERMISSIONS);
+            }
+            return;
+        }
+        if (!java.util.Objects.equals(workflow.getSpaceId(), spaceId)) {
+            throw new BusinessException(ResponseEnum.INSUFFICIENT_PERMISSIONS);
+        }
     }
 
     private SkillSandboxConfig getActiveConfig(String uid, Long spaceId) {
         SkillSandboxConfig config = getScopedConfig(uid, spaceId);
+        if (config == null
+                || !Boolean.TRUE.equals(config.getEnabled())
+                || StringUtils.isBlank(config.getApiKey())) {
+            return null;
+        }
+        return config;
+    }
+
+    private SkillSandboxConfig getActiveConfigForTrustedScope(String uid, Long spaceId) {
+        if (spaceId == null && StringUtils.isBlank(uid)) {
+            throw new BusinessException(ResponseEnum.UNAUTHORIZED);
+        }
+        SkillSandboxConfig config = getOne(scopeQuery(uid, spaceId), false);
         if (config == null
                 || !Boolean.TRUE.equals(config.getEnabled())
                 || StringUtils.isBlank(config.getApiKey())) {
@@ -199,7 +266,7 @@ public class SkillSandboxConfigService
     }
 
     private String normalizeProvider(String provider) {
-        return StringUtils.defaultIfBlank(StringUtils.lowerCase(StringUtils.trimToEmpty(provider)), PROVIDER_E2B);
+        return PROVIDER_E2B;
     }
 
     private int normalizeTimeout(Integer timeoutSeconds) {
