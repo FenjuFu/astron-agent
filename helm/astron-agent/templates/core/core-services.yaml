@@ -10,6 +10,10 @@
 {{- $langfusePublicKeyKey := default "public-key" (get $langfuseSecret "publicKeyKey") }}
 {{- $langfuseSecretKeyKey := default "secret-key" (get $langfuseSecret "secretKeyKey") }}
 {{- $langfuseTraceContextSecretKey := default "trace-context-secret" (get $langfuseSecret "traceContextSecretKey") }}
+{{- $workflowAuth := default (dict) $.Values.workflowInternalAuth }}
+{{- $workflowAuthExisting := default (dict) (get $workflowAuth "existingSecret") }}
+{{- $workflowAuthSecretName := default (printf "%s-workflow-internal-auth" (include "astron-agent.fullname" $)) (get $workflowAuthExisting "name") }}
+{{- $workflowAuthSecretKey := default "workflow-internal-api-key" (get $workflowAuthExisting "key") }}
 {{- range $serviceName := $services }}
 {{- $serviceConfig := index $.Values $serviceName }}
 {{- if $serviceConfig.enabled }}
@@ -96,6 +100,13 @@ spec:
         - name: {{ upper (snakecase $key) }}
           value: {{ $value | quote }}
         {{- end }}
+        {{- end }}
+        {{- if eq $serviceName "coreWorkflow" }}
+        - name: WORKFLOW_INTERNAL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $workflowAuthSecretName | quote }}
+              key: {{ $workflowAuthSecretKey | quote }}
         {{- end }}
         {{- if or (eq $serviceName "coreAgent") (eq $serviceName "coreWorkflow") }}
         - name: LANGFUSE_ENABLED

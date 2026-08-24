@@ -260,7 +260,7 @@ class CodeExecutorConfig(BaseSettings):
 
     model_config = {"env_prefix": "", "case_sensitive": False}
 
-    exec_type: str = Field(default="local", alias="CODE_EXEC_TYPE")
+    exec_type: str = Field(default="disabled", alias="CODE_EXEC_TYPE")
     url: str = Field(default="", alias="CODE_EXEC_URL")
     timeout: int = Field(default=10, alias="CODE_EXEC_TIMEOUT_SEC")
     api_key: str = Field(default="", alias="CODE_EXEC_API_KEY")

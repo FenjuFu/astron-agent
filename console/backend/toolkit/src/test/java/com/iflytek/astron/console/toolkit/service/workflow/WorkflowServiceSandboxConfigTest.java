@@ -1,11 +1,13 @@
 package com.iflytek.astron.console.toolkit.service.workflow;
 
+import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.node.BizNodeData;
 import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxConfigDto;
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.BizWorkflowNode;
 import com.iflytek.astron.console.toolkit.service.skill.SkillSandboxConfigService;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -136,5 +138,38 @@ class WorkflowServiceSandboxConfigTest {
         assertThat(sandbox.getString("apiKey")).isEqualTo("approval-secret");
         assertThat(sandbox.getString("spaceId")).isEqualTo("200");
         verify(skillSandboxConfigService).toRuntimeDto("approval-user", 200L);
+    }
+
+    @Test
+    void enrichCodeRunSandboxDropsClientControlledSandbox() {
+        SkillSandboxConfigDto config = new SkillSandboxConfigDto();
+        config.setEnabled(Boolean.FALSE);
+        config.setApiKey("");
+        when(skillSandboxConfigService.toRuntimeDto()).thenReturn(config);
+
+        JSONObject request = new JSONObject();
+        request.put("flow_id", "flow-1");
+        request.put("node_id", "ifly-code::code-1");
+        request.put("sandbox", new JSONObject()
+                .fluentPut("apiKey", "attacker-controlled")
+                .fluentPut("artifactUploadUrl", "http://internal-service"));
+
+        Object enriched = ReflectionTestUtils.invokeMethod(
+                workflowService, "enrichCodeRunSandbox", request);
+
+        assertThat(JSON.parseObject(JSON.toJSONString(enriched)))
+                .doesNotContainKey("sandbox");
+    }
+
+    @Test
+    void workflowInternalHeadersUseConfiguredSecret() {
+        ReflectionTestUtils.setField(
+                workflowService, "workflowInternalApiKey", "internal-secret");
+
+        Map<String, String> headers = ReflectionTestUtils.invokeMethod(
+                workflowService, "workflowInternalHeaders");
+
+        assertThat(headers)
+                .containsEntry("X-Workflow-Internal-Key", "internal-secret");
     }
 }

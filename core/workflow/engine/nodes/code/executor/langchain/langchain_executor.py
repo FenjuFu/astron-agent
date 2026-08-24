@@ -33,7 +33,8 @@ class LangchainExecutor(BaseExecutor):
         """
         try:
             # Create Pyodide sandbox instance for secure code execution
-            sandbox = PyodideSandbox(allow_net=True)
+            # Code nodes do not need access to the deployment's internal network.
+            sandbox = PyodideSandbox(allow_net=False)
             result = await sandbox.execute(code)
             if result.status == "success":
                 return result.stdout if result.stdout else ""
