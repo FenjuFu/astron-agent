@@ -133,7 +133,7 @@ class CodeNode(BaseNode):
         # Create appropriate code executor based on environment configuration
         sandbox_config = self._runtime_sandbox_config(span_context)
         executor_type = (
-            "e2b" if sandbox_config else os.getenv("CODE_EXEC_TYPE", "local")
+            "e2b" if sandbox_config else os.getenv("CODE_EXEC_TYPE", "disabled")
         )
         code_executor = CodeExecutorFactory.create_executor(executor_type)
         # Execute code with timeout configuration
