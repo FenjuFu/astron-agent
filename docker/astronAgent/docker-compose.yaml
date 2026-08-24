@@ -464,6 +464,8 @@ services:
       SKILL_RESOURCE_TRUSTED_ORIGIN: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT to the exact origin used by presigned URLs}"
       SKILL_RESOURCE_TRUSTED_BUCKET: "${OSS_BUCKET_CONSOLE:?Set OSS_BUCKET_CONSOLE explicitly}"
     depends_on:
+      console-hub:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       mysql:
@@ -589,6 +591,8 @@ services:
       SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN_FILE: "/app/secrets/runtime/sandbox-runtime-credential-token"
       SKILL_SANDBOX_RUNTIME_CONFIG_URL: "http://console-hub:8080/skill-sandbox/internal-runtime-config"
     depends_on:
+      console-hub:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       mysql:
@@ -753,6 +757,11 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error http://localhost:8080/health >/dev/null"]
+      interval: ${HEALTH_CHECK_INTERVAL:-30s}
+      timeout: ${HEALTH_CHECK_TIMEOUT:-10s}
+      retries: ${HEALTH_CHECK_RETRIES:-60}
     networks:
       - astron-agent-network
     restart: always

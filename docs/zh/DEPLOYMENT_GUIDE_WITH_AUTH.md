@@ -67,8 +67,8 @@ docker compose logs -f ragflow
 # 进入 astronAgent 目录
 cd docker/astronAgent
 
-# 复制环境变量配置
-cp .env.example .env
+# 创建仅部署用户可读写的环境变量文件
+install -m 600 .env.example .env
 ```
 
 `.env` 文件只用于配置服务启动、访问地址、认证、数据库、Redis、对象存储等基础设施参数。RAGFlow、讯飞开放平台、AI Ability Chat、虚拟人能力、星火知识库等业务能力账号不再写入 `.env`，请在 AstronAgent 启动后登录控制台，通过 **平台账号管理** 页面配置。
@@ -174,12 +174,16 @@ curl -X PUT 'https://chatdoc.xfyun.cn/openapi/v1/dataset/create' \
 # 进入 astronAgent 目录
 cd docker/astronAgent
 
-# 启动所有服务（包含 Casdoor）
-docker compose -f docker-compose-with-auth.yaml up -d
+# 变更服务前，先校验完整渲染后的凭据共享与健康检查契约
+python3 scripts/verify_security_contract.py --compose-file docker-compose-with-auth.yaml
+
+# 启动所有服务，并等待已配置的健康检查收敛
+docker compose -f docker-compose-with-auth.yaml up -d --wait --wait-timeout 900
 ```
 
 **说明：**
 - Casdoor默认的登录账户名：`admin`，密码：`123`
+- 升级时必须让检出的 Compose 清单与应用镜像同步更新。`docker compose pull` 只更新镜像，不会更新 `docker-compose.yaml`；停止现有服务前应运行仓库提供的部署契约预检，并保留 `.env` 与命名卷。常规升级禁止使用 `down -v`。
 
 ### 第四步：配置平台账号管理（可选，按需配置业务能力）
 

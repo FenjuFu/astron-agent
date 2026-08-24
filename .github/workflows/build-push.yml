@@ -81,13 +81,43 @@ jobs:
           echo "📤 Should push: $SHOULD_PUSH"
           echo "🏗️ Platforms: $PLATFORMS"
 
+  verify-compose-security-contract:
+    name: 🔐 Verify Compose Security Contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: console/backend/pom.xml
+
+      - name: Build Hub test dependencies
+        run: >-
+          mvn -f console/backend/pom.xml -pl hub -am
+          -DskipTests install
+
+      - name: Verify sandbox deployment configuration binding
+        run: >-
+          mvn -f console/backend/pom.xml -pl hub
+          -Dtest=SkillSandboxDeploymentConfigurationTest test
+
+      - name: Verify rendered sandbox credential contract
+        run: >-
+          python3 docker/astronAgent/scripts/verify_security_contract.py
+          --ci-placeholder-required-env
+
   # ============================================================================
   # Stage 2: Build astron Agent Docker Images (Parallel Jobs)
   # ============================================================================
   build-core-tenant:
     name: 🏢 Build Core Tenant
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -133,7 +163,7 @@ jobs:
   build-core-database:
     name: 🧠 Build Core Database
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -179,7 +209,7 @@ jobs:
   build-core-rpa:
     name: 🤖 Build Core RPA
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -225,7 +255,7 @@ jobs:
   build-core-link:
     name: 🔗 Build Core Link
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -271,7 +301,7 @@ jobs:
   build-core-aitools:
     name: 🛠️ Build Core AI Tools
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -317,7 +347,7 @@ jobs:
   build-core-agent:
     name: 🤖 Build Core Agent
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -363,7 +393,7 @@ jobs:
   build-core-knowledge:
     name: 📚 Build Core Knowledge
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -409,7 +439,7 @@ jobs:
   build-core-workflow:
     name: ⚡ Build Core Workflow
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -455,7 +485,7 @@ jobs:
   build-console-frontend:
     name: 🌐 Build Console Frontend
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -503,7 +533,7 @@ jobs:
   build-console-hub:
     name: 🎯 Build Console Hub
     runs-on: ubuntu-latest
-    needs: detect-and-prepare
+    needs: [detect-and-prepare, verify-compose-security-contract]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -556,6 +586,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - detect-and-prepare
+      - verify-compose-security-contract
       - build-core-tenant
       - build-core-database
       - build-core-rpa
@@ -573,6 +604,7 @@ jobs:
           echo "=== 🐳 astron Agent Multi-Service Docker Build Summary ==="
           echo ""
           echo "🔍 Project Detection: ${{ needs.detect-and-prepare.result }}"
+          echo "🔐 Compose Security Contract: ${{ needs.verify-compose-security-contract.result }}"
           echo "📊 Version: ${{ needs.detect-and-prepare.outputs.version }}"
           echo "📤 Push to Registry: ${{ needs.detect-and-prepare.outputs.should-push }}"
           echo "🏗️ Target Platforms: ${{ needs.detect-and-prepare.outputs.platforms }}"
