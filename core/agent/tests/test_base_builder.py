@@ -6,9 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
-from common.otlp import sid as sid_module
-from common.otlp.trace.span import Span
-
 from agent.domain.models.base import AnthropicLLMModel, BaseLLMModel, GoogleLLMModel
 from agent.engine.nodes.chat.chat_runner import ChatRunner
 from agent.engine.nodes.cot.cot_runner import CotRunner
@@ -21,6 +18,20 @@ from agent.service.builder.base_builder import (
 )
 from agent.service.plugin.base import BasePlugin
 from agent.service.plugin.base import BasePlugin as RealBasePlugin
+from agent.service.plugin.skill_resource_security import (
+    SKILL_RESOURCE_TRUSTED_BUCKET_ENV,
+    SKILL_RESOURCE_TRUSTED_ORIGIN_ENV,
+)
+from common.otlp import sid as sid_module
+from common.otlp.trace.span import Span
+
+_SIGV4_QUERY = (
+    "X-Amz-Algorithm=AWS4-HMAC-SHA256&"
+    "X-Amz-Credential=test%2F20260824%2Fus-east-1%2Fs3%2Faws4_request&"
+    "X-Amz-Date=20260824T000000Z&X-Amz-Expires=300&"
+    "X-Amz-SignedHeaders=host&X-Amz-Signature=" + "a" * 64
+)
+_SKILL_URL = f"https://example.com/console-oss/skill-files/user/skill.md?{_SIGV4_QUERY}"
 
 
 @dataclass
@@ -119,8 +130,12 @@ class TestBaseApiBuilder:
             assert len(plugins) > 0
 
     @pytest.mark.asyncio
-    async def test_build_plugins_with_skills(self, builder: BaseApiBuilder) -> None:
+    async def test_build_plugins_with_skills(
+        self, builder: BaseApiBuilder, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test building plugins (skills)"""
+        monkeypatch.setenv(SKILL_RESOURCE_TRUSTED_ORIGIN_ENV, "https://example.com")
+        monkeypatch.setenv(SKILL_RESOURCE_TRUSTED_BUCKET_ENV, "console-oss")
         plugins = await builder.build_plugins(
             [],
             [],
@@ -131,7 +146,7 @@ class TestBaseApiBuilder:
                     "skill_id": "skill-1",
                     "name": "ui-ux-pro-max",
                     "description": "Design reference skill",
-                    "download_url": "https://example.com/skill.md",
+                    "download_url": _SKILL_URL,
                 }
             ],
         )
