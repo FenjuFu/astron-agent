@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.util.unit.DataSize;
 
@@ -51,6 +52,20 @@ class WorkflowArtifactFileValidatorTest {
         properties = new SkillSandboxArtifactProperties();
         properties.setArtifactMaxFileSize(DataSize.ofMegabytes(2));
         validator = new WorkflowArtifactFileValidator(properties);
+    }
+
+    @Test
+    void springContextWiresProductionConstructor() {
+        try (AnnotationConfigApplicationContext context =
+                new AnnotationConfigApplicationContext()) {
+            context.registerBean(
+                    SkillSandboxArtifactProperties.class, () -> properties);
+            context.register(WorkflowArtifactFileValidator.class);
+
+            context.refresh();
+
+            assertThat(context.getBean(WorkflowArtifactFileValidator.class)).isNotNull();
+        }
     }
 
     @ParameterizedTest(name = "accepts real {0} artifact")

@@ -33,6 +33,7 @@ import org.apache.poi.poifs.filesystem.DirectoryEntry;
 import org.apache.poi.poifs.filesystem.Entry;
 import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 import org.apache.tika.Tika;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -107,6 +108,7 @@ public class WorkflowArtifactFileValidator {
     private final OoxmlResourceLimits ooxmlResourceLimits;
     private final Tika tika = new Tika();
 
+    @Autowired
     public WorkflowArtifactFileValidator(SkillSandboxArtifactProperties properties) {
         this(
                 properties,
