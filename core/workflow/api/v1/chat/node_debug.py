@@ -8,7 +8,7 @@ including code execution and node-specific debugging functionality.
 import json
 from typing import Any, Dict
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from starlette.responses import JSONResponse
 
 from workflow.domain.entities.node_debug_vo import CodeRunVo, NodeDebugVo
@@ -17,12 +17,18 @@ from workflow.engine.entities.workflow_dsl import WorkflowDSL
 from workflow.engine.nodes.code.code_node import CodeNode
 from workflow.exception.e import CustomException
 from workflow.exception.errors.err_code import CodeEnum
+from workflow.extensions.fastapi.middleware.auth import (
+    require_workflow_internal_api_key,
+)
 from workflow.extensions.otlp.metric.meter import Meter
 from workflow.extensions.otlp.trace.span import Span
 from workflow.service import flow_service
 from workflow.utils.trace_sanitization import serialize_trace_payload
 
-router = APIRouter(tags=["code_debug"])
+router = APIRouter(
+    tags=["code_debug"],
+    dependencies=[Depends(require_workflow_internal_api_key)],
+)
 
 
 @router.post("/run", status_code=200)  # Legacy interface compatibility

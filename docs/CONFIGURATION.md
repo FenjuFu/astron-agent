@@ -17,6 +17,11 @@ Before deploying with Docker Compose, the following environment variables **must
 - **Host Address Configuration**:
   - `HOST_BASE_ADDRESS` - Set to your server address or domain name
 
+- **Workflow Internal Authentication**:
+  - `WORKFLOW_INTERNAL_API_KEY` - Generate at least 32 random bytes and use
+    the same value for console-hub and core-workflow. The placeholder value is
+    rejected. The Helm chart generates and preserves this Secret automatically.
+
 **Business capability accounts configured after startup in Platform Account Management** (not written to `.env`):
 
 - **iFLYTEK Open Platform**: `PLATFORM_APP_ID`, `PLATFORM_API_KEY`, `PLATFORM_API_SECRET`, `SPARK_API_PASSWORD`, `SPARK_RTASR_API_KEY`
@@ -257,6 +262,11 @@ See the [Langfuse observability guide](/guide/observability) for privacy behavio
 | WORKFLOW_MYSQL_DB | Required | string | MySQL database name used by Workflow module | workflow |
 | WORKFLOW_KAFKA_TOPIC | Required | string | Kafka topic name used by Workflow | spark-agent-builder |
 | RUNTIME_ENV | Required | string | Runtime environment (dev/test/prod) | dev |
+| CODE_EXEC_TYPE | Required | string | Isolated code executor. The default is `disabled`; `local` is rejected. Configure E2B, iFly, iFly-v2, or the network-disabled LangChain sandbox before enabling code nodes. | disabled |
+| WORKFLOW_INTERNAL_API_KEY | User Required | secret | Authenticates privileged console-hub calls to workflow node-debug and code-run APIs. Use at least 32 random bytes. | generated secret |
+
+When no isolated executor is configured, code nodes fail closed. Running
+user-provided code inside the core-workflow process is not supported.
 
 ---
 

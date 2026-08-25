@@ -179,6 +179,9 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     public static final String NODE_DEBUG_PATH = "/workflow/v1/node/debug/";
     public static final String PROTOCOL_BUILD_PATH = "/workflow/v1/protocol/build/";
     public static final String CODE_RUN_PATH = "/workflow/v1/run";
+    private static final String WORKFLOW_INTERNAL_API_KEY_HEADER = "X-Workflow-Internal-Key";
+    private static final String WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER =
+            "CHANGE_ME_WORKFLOW_INTERNAL_API_KEY";
     public static final String CLONED_SUFFIX_PATTERN = "[(]\\d+[)]$";
 
     private static final String JSON_KEY_BOT_ID = "botId";
@@ -195,6 +198,8 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
     @Value("${spring.profiles.active}")
     String env;
+    @Value("${workflow.internal-api-key:}")
+    String workflowInternalApiKey;
     @org.springframework.beans.factory.annotation.Value("${mcp-server.file-path}")
     private String mcpServerFilePath;
 
@@ -1558,7 +1563,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
                 debugDto.getFlowId(),
                 nodeId,
                 body.getBytes(StandardCharsets.UTF_8).length);
-        String response = OkHttpUtil.post(url, body);
+        String response = OkHttpUtil.post(url, workflowInternalHeaders(), body);
         int responseBytes = response == null
                 ? 0
                 : response.getBytes(StandardCharsets.UTF_8).length;
@@ -3605,7 +3610,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
         // body = StringEscapeUtils.unescapeJava(body);
 
-        String resp = OkHttpUtil.post(url, body);
+        String resp = OkHttpUtil.post(url, workflowInternalHeaders(), body);
         int responseBytes = resp == null ? 0 : resp.getBytes(StandardCharsets.UTF_8).length;
         final Result<?> result;
         try {
@@ -3635,6 +3640,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
     private Object enrichCodeRunSandbox(Object runCodeData) {
         JSONObject payload = JSON.parseObject(JSON.toJSONString(runCodeData));
+        // Never accept sandbox credentials or upload targets from the client.
         payload.remove("sandbox");
         String flowId = StringUtils.trimToEmpty(payload.getString("flow_id"));
         Assert.notEmpty(flowId);
@@ -3647,6 +3653,16 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             payload.put("sandbox", sandbox);
         }
         return payload;
+    }
+
+    private Map<String, String> workflowInternalHeaders() {
+        if (StringUtils.isBlank(workflowInternalApiKey)
+                || WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER.equals(workflowInternalApiKey)) {
+            throw new IllegalStateException(
+                    "WORKFLOW_INTERNAL_API_KEY must be configured before calling workflow debug APIs");
+        }
+        return Collections.singletonMap(
+                WORKFLOW_INTERNAL_API_KEY_HEADER, workflowInternalApiKey);
     }
 
     private void injectScriptSandboxIntoCodeNodes(List<BizWorkflowNode> nodes, String flowId) {

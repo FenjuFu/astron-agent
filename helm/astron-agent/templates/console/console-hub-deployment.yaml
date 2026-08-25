@@ -1,4 +1,8 @@
 {{- if .Values.consoleHub.enabled }}
+{{- $workflowAuth := default (dict) .Values.workflowInternalAuth }}
+{{- $workflowAuthExisting := default (dict) (get $workflowAuth "existingSecret") }}
+{{- $workflowAuthSecretName := default (printf "%s-workflow-internal-auth" (include "astron-agent.fullname" .)) (get $workflowAuthExisting "name") }}
+{{- $workflowAuthSecretKey := default "workflow-internal-api-key" (get $workflowAuthExisting "key") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -138,6 +142,11 @@ spec:
             secretKeyRef:
               name: {{ include "astron-agent.sandboxRuntimeCredentialSecretName" . }}
               key: {{ include "astron-agent.sandboxRuntimeCredentialSecretKey" . }}
+        - name: WORKFLOW_INTERNAL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $workflowAuthSecretName | quote }}
+              key: {{ $workflowAuthSecretKey | quote }}
         ports:
         - name: http
           containerPort: {{ .Values.consoleHub.service.port }}

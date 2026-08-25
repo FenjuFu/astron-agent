@@ -534,6 +534,7 @@ services:
     container_name: astron-agent-core-workflow
     environment:
       RUNTIME_ENV: "${RUNTIME_ENV:-dev}"
+      WORKFLOW_INTERNAL_API_KEY: "${WORKFLOW_INTERNAL_API_KEY:-CHANGE_ME_WORKFLOW_INTERNAL_API_KEY}"
       SERVICE_PORT: "${CORE_WORKFLOW_PORT:-7880}"
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
@@ -667,6 +668,7 @@ services:
     extra_hosts:
       - "localhost:host-gateway"
     environment:
+      WORKFLOW_INTERNAL_API_KEY: "${WORKFLOW_INTERNAL_API_KEY:-CHANGE_ME_WORKFLOW_INTERNAL_API_KEY}"
       CONSOLE_CASDOOR_URL: "${CONSOLE_CASDOOR_URL:-}"
       CONSOLE_CASDOOR_ID: "${CONSOLE_CASDOOR_ID:-}"
       CONSOLE_CASDOOR_APP: "${CONSOLE_CASDOOR_APP:-}"

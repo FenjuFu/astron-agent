@@ -1,11 +1,13 @@
 import asyncio
 import json
 import os
-from typing import Any
+import secrets
+from typing import Annotated, Any
 
 import httpx
 from common.utils.hmac_auth import HMACAuth
-from fastapi import Request
+from fastapi import HTTPException, Request, Security, status
+from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
@@ -18,6 +20,41 @@ from workflow.extensions.fastapi.base import (
 )
 from workflow.extensions.middleware.getters import get_cache_service
 from workflow.extensions.otlp.trace.span import Span
+
+WORKFLOW_INTERNAL_API_KEY_ENV = "WORKFLOW_INTERNAL_API_KEY"
+WORKFLOW_INTERNAL_API_KEY_HEADER = "X-Workflow-Internal-Key"
+WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER = "CHANGE_ME_WORKFLOW_INTERNAL_API_KEY"
+
+_workflow_internal_api_key_header = APIKeyHeader(
+    name=WORKFLOW_INTERNAL_API_KEY_HEADER,
+    auto_error=False,
+)
+
+
+def _configured_workflow_internal_api_key() -> str:
+    api_key = os.getenv(WORKFLOW_INTERNAL_API_KEY_ENV, "").strip()
+    if not api_key or api_key == WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Workflow internal API authentication is not configured",
+        )
+    return api_key
+
+
+async def require_workflow_internal_api_key(
+    supplied_api_key: Annotated[
+        str | None, Security(_workflow_internal_api_key_header)
+    ],
+) -> None:
+    """Authenticate trusted service-to-service workflow debug requests."""
+    expected_api_key = _configured_workflow_internal_api_key()
+    if not supplied_api_key or not secrets.compare_digest(
+        supplied_api_key, expected_api_key
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid workflow internal API credentials",
+        )
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

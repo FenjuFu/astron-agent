@@ -6,6 +6,7 @@ import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxRuntimeRe
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.BizWorkflowNode;
 import com.iflytek.astron.console.toolkit.service.skill.SkillSandboxConfigService;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -159,5 +160,17 @@ class WorkflowServiceSandboxConfigTest {
         assertThat(sandbox).doesNotContainKey("apiKey");
         assertThat(sandbox.getString("spaceId")).isEqualTo("200");
         verify(skillSandboxConfigService).toRuntimeRefDto("approval-user", 200L);
+    }
+
+    @Test
+    void workflowInternalHeadersUseConfiguredSecret() {
+        ReflectionTestUtils.setField(
+                workflowService, "workflowInternalApiKey", "internal-secret");
+
+        Map<String, String> headers = ReflectionTestUtils.invokeMethod(
+                workflowService, "workflowInternalHeaders");
+
+        assertThat(headers)
+                .containsEntry("X-Workflow-Internal-Key", "internal-secret");
     }
 }

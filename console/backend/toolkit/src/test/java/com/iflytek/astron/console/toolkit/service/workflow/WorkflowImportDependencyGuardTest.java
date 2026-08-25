@@ -59,6 +59,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -124,6 +125,8 @@ class WorkflowImportDependencyGuardTest {
         ReflectionTestUtils.setField(workflowService, "coreSystemService", coreSystemService);
         ReflectionTestUtils.setField(workflowService, "apiUrl", apiUrl);
         ReflectionTestUtils.setField(workflowService, "configInfoMapper", configInfoMapper);
+        ReflectionTestUtils.setField(
+                workflowService, "workflowInternalApiKey", "internal-secret");
         ReflectionTestUtils.setField(
                 workflowService, "skillSandboxConfigService", skillSandboxConfigService);
         ConfigInfo multiRoundTypes = new ConfigInfo();
@@ -280,7 +283,7 @@ class WorkflowImportDependencyGuardTest {
             assertUnresolvedDependencyFailure(
                     () -> workflowService.nodeDebug("message::node", request));
 
-            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyString()), never());
+            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyMap(), anyString()), never());
         }
 
         verify(dataPermissionCheckTool).checkWorkflowBelong(workflow, null);
@@ -318,7 +321,7 @@ class WorkflowImportDependencyGuardTest {
                     .extracting("responseEnum")
                     .isEqualTo(ResponseEnum.INSUFFICIENT_PERMISSIONS);
 
-            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyString()), never());
+            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyMap(), anyString()), never());
         }
 
         verify(dataPermissionCheckTool).checkWorkflowBelong(workflow, null);
@@ -343,13 +346,17 @@ class WorkflowImportDependencyGuardTest {
 
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
-                    eq("http://core/workflow/v1/node/debug/"), anyString()))
+                    eq("http://core/workflow/v1/node/debug/"),
+                    eq(Map.of("X-Workflow-Internal-Key", "internal-secret")),
+                    anyString()))
                     .thenReturn("{\"code\":0,\"data\":{\"result\":\"ok\"}}");
 
             assertThat(workflowService.nodeDebug("message::node", request).code()).isZero();
 
             okHttp.verify(() -> OkHttpUtil.post(
-                    eq("http://core/workflow/v1/node/debug/"), anyString()), times(1));
+                    eq("http://core/workflow/v1/node/debug/"),
+                    eq(Map.of("X-Workflow-Internal-Key", "internal-secret")),
+                    anyString()), times(1));
         }
 
         verify(dataPermissionCheckTool).checkWorkflowBelong(workflow, null);
@@ -381,9 +388,9 @@ class WorkflowImportDependencyGuardTest {
 
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
-                    eq("http://core/workflow/v1/node/debug/"), anyString()))
+                    eq("http://core/workflow/v1/node/debug/"), anyMap(), anyString()))
                     .thenAnswer(invocation -> {
-                        forwardedBody.set(invocation.getArgument(1));
+                        forwardedBody.set(invocation.getArgument(2));
                         return "{\"code\":0,\"data\":{\"result\":\"ok\"}}";
                     });
 
@@ -422,7 +429,7 @@ class WorkflowImportDependencyGuardTest {
 
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
-                    eq("http://core/workflow/v1/node/debug/"), anyString()))
+                    eq("http://core/workflow/v1/node/debug/"), anyMap(), anyString()))
                     .thenReturn(response);
 
             assertThat(workflowService.nodeDebug("message::node", request).code()).isZero();
@@ -464,9 +471,11 @@ class WorkflowImportDependencyGuardTest {
 
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
-                    eq("http://core/workflow/v1/run"), anyString()))
+                    eq("http://core/workflow/v1/run"),
+                    eq(Map.of("X-Workflow-Internal-Key", "internal-secret")),
+                    anyString()))
                     .thenAnswer(invocation -> {
-                        forwardedBody.set(invocation.getArgument(1));
+                        forwardedBody.set(invocation.getArgument(2));
                         return "{\"code\":0,\"data\":{}}";
                     });
 
@@ -506,7 +515,7 @@ class WorkflowImportDependencyGuardTest {
                     .extracting("responseEnum")
                     .isEqualTo(ResponseEnum.INSUFFICIENT_PERMISSIONS);
 
-            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyString()), never());
+            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyMap(), anyString()), never());
         }
     }
 
@@ -529,7 +538,7 @@ class WorkflowImportDependencyGuardTest {
 
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
-                    eq("http://core/workflow/v1/run"), anyString()))
+                    eq("http://core/workflow/v1/run"), anyMap(), anyString()))
                     .thenReturn(response);
 
             workflowService.runCode(request);
@@ -550,7 +559,7 @@ class WorkflowImportDependencyGuardTest {
         String malformedSentinel = "malformed-upstream-body-must-not-echo";
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
-                    eq("http://core/workflow/v1/run"), anyString()))
+                    eq("http://core/workflow/v1/run"), anyMap(), anyString()))
                     .thenReturn("{" + malformedSentinel);
 
             assertThatThrownBy(() -> workflowService.runCode(request))

@@ -25,6 +25,13 @@ langfuse:
     # Independent Astron-only secret, not a Langfuse project credential.
     traceContextSecretKey: "trace-context-secret"
 
+# Shared authentication for privileged console-hub -> core-workflow calls.
+# Leave the name empty to let Helm generate and preserve a random Secret.
+workflowInternalAuth:
+  existingSecret:
+    name: ""
+    key: "workflow-internal-api-key"
+
 # Override the full name for consistent resource naming
 fullnameOverride: "astron-agent"
 
