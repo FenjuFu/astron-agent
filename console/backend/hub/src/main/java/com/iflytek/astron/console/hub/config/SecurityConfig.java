@@ -76,7 +76,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .anyRequest()
                         .hasRole("ARTIFACT_UPLOADER"))
-                .csrf(AbstractHttpConfigurer::disable)
+                .csrf(csrf -> csrf.ignoringRequestMatchers(
+                        "/workflow/artifacts/internal-upload"))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(restfulAuthenticationEntryPoint)
                         .accessDeniedHandler(restfulAccessDeniedHandler))
@@ -100,7 +101,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .anyRequest()
                         .hasRole("SANDBOX_RUNTIME_CREDENTIAL_READER"))
-                .csrf(AbstractHttpConfigurer::disable)
+                .csrf(csrf -> csrf.ignoringRequestMatchers(
+                        "/skill-sandbox/internal-runtime-config"))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(restfulAuthenticationEntryPoint)
                         .accessDeniedHandler(restfulAccessDeniedHandler))
