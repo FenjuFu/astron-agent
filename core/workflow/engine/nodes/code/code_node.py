@@ -276,13 +276,13 @@ def _parser_code_parameter(python_code: str) -> list[str]:
     # Regex pattern to match function definitions with optional type hints
     re_pattern = r"def\s+(\w+)\s*\(([^)]*)\)\s*(?:->\s*[\w\[\],\s]*)?:"
     re_matches = re.findall(re_pattern, python_code, re.DOTALL)
-    re_parameter = ""
+    re_parameter: str | None = None
     # Find the main function specifically
     for re_match in re_matches:
         if re_match[0].strip() == "main":
             re_parameter = re_match[1].strip()
             break
-    if not re_parameter:
+    if re_parameter is None:
         raise CustomException(
             CodeEnum.CODE_BUILD_ERROR,
             err_msg="can not find main function",
