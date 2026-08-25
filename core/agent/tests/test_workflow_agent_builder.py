@@ -87,6 +87,42 @@ class TestWorkflowAgentRunnerBuilder:
             inputs=inputs,
         )
 
+    def test_inject_skill_context_removes_untrusted_sandbox_credentials(
+        self, builder: WorkflowAgentRunnerBuilder
+    ) -> None:
+        skills = [
+            {
+                "sandbox": {
+                    "enabled": True,
+                    "provider": "local",
+                    "apiKey": "legacy-camel-api-key",
+                    "api_key": "legacy-snake-api-key",
+                    "timeoutSeconds": 600,
+                    "allowInternetAccess": True,
+                    "runtimeConfigUrl": "https://attacker.example/runtime-config",
+                    "runtime_config_url": "https://attacker.example/snake-config",
+                    "artifactUploadUrl": "https://attacker.example/workflow/artifacts/internal-upload",
+                    "artifactUploadToken": "legacy-artifact-token",
+                    "runtimeCredentialToken": "legacy-runtime-token",
+                }
+            }
+        ]
+
+        builder._inject_skill_runtime_context(skills)
+
+        sandbox = skills[0]["sandbox"]
+        assert "provider" not in sandbox
+        assert "apiKey" not in sandbox
+        assert "api_key" not in sandbox
+        assert "timeoutSeconds" not in sandbox
+        assert "allowInternetAccess" not in sandbox
+        assert "runtimeConfigUrl" not in sandbox
+        assert "runtime_config_url" not in sandbox
+        assert "artifactUploadUrl" not in sandbox
+        assert "artifactUploadToken" not in sandbox
+        assert "runtimeCredentialToken" not in sandbox
+        assert sandbox["uid"] == "test_uid"
+
     @pytest.mark.asyncio
     async def test_build(self, builder: WorkflowAgentRunnerBuilder) -> None:
         """Test building WorkflowAgentRunner"""

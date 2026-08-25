@@ -12,6 +12,7 @@ from common.otlp.trace.langfuse import (
     langfuse_observation_attributes,
     langfuse_trace_attributes,
     langfuse_trace_context,
+    serialize_langfuse_value,
 )
 from common.otlp.trace.span import Span
 from common.otlp.trace.trace import Trace
@@ -30,6 +31,10 @@ workflow_agent_router = APIRouter()
 
 headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 _STREAM_END = object()
+
+
+def _serialize_workflow_agent_inputs(inputs: CustomCompletionInputs) -> str:
+    return serialize_langfuse_value(inputs.model_dump(by_alias=True)) or "{}"
 
 
 def _chunk_content(response: str) -> str:
@@ -146,7 +151,7 @@ class CustomChatCompletion(CompletionBase):
                 }
             )
             sp.add_info_events(
-                {"workflow-agent-inputs": self.inputs.model_dump_json(by_alias=True)}
+                {"workflow-agent-inputs": _serialize_workflow_agent_inputs(self.inputs)}
             )
             node_trace = await self.build_node_trace(bot_id=self.bot_id, span=sp)
             meter = await self.build_meter(sp)

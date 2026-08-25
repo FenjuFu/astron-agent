@@ -1,5 +1,8 @@
 package com.iflytek.astron.console.hub.service.workflow.impl;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.alibaba.fastjson2.JSONObject;
 import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.dto.bot.ChatBotApi;
@@ -20,6 +23,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 
@@ -29,6 +33,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -73,7 +78,8 @@ class WorkflowReleaseServiceImplTest {
                 .thenReturn(ApiResult.success(new JSONObject()
                         .fluentPut("workflowVersionId", 18L)
                         .fluentPut("workflowVersionName", "v1.0")));
-        when(versionService.update_channel_result(any(WorkflowVersion.class)))
+        when(versionService.updateChannelResultForBoundBotPublish(
+                any(WorkflowVersion.class), eq("requester-uid"), eq(1L)))
                 .thenReturn(ApiResult.success(new JSONObject()));
         WorkflowVersion storedVersion = new WorkflowVersion();
         storedVersion.setSysData("{\"nodes\":[]}");
@@ -100,6 +106,12 @@ class WorkflowReleaseServiceImplTest {
         assertThat(createCaptor.getValue().getBotId()).isEqualTo("25");
         assertThat(createCaptor.getValue().getFlowId()).isEqualTo("flow-1");
         assertThat(createCaptor.getValue().getName()).isEqualTo("v1.0");
+        ArgumentCaptor<WorkflowVersion> resultCaptor =
+                ArgumentCaptor.forClass(WorkflowVersion.class);
+        verify(versionService).updateChannelResultForBoundBotPublish(
+                resultCaptor.capture(), eq("requester-uid"), eq(1L));
+        assertThat(resultCaptor.getValue().getId()).isEqualTo(18L);
+        assertThat(resultCaptor.getValue().getFlowId()).isEqualTo("flow-1");
         verify(maasUtil).createApi(eq("flow-1"), eq("680ab54f"), eq("v1.0"), any(JSONObject.class));
     }
 
@@ -112,7 +124,8 @@ class WorkflowReleaseServiceImplTest {
                 .thenReturn(ApiResult.success(new JSONObject()
                         .fluentPut("workflowVersionId", 18L)
                         .fluentPut("workflowVersionName", "v1.0")));
-        when(versionService.update_channel_result(any(WorkflowVersion.class)))
+        when(versionService.updateChannelResultForBoundBotPublish(
+                        any(WorkflowVersion.class), eq("requester-uid"), eq(1L)))
                 .thenReturn(ApiResult.success(new JSONObject()));
         WorkflowVersion storedVersion = new WorkflowVersion();
         storedVersion.setSysData("{\"nodes\":[]}");
@@ -181,6 +194,35 @@ class WorkflowReleaseServiceImplTest {
 
         verify(maasUtil, never()).createApi(any(), any(), any(), any(JSONObject.class));
         verify(workflowVersionMapper, never()).selectOne(any());
-        verify(versionService, never()).update_channel_result(any(WorkflowVersion.class));
+        verify(versionService, never())
+                .updateChannelResultForBoundBotPublish(any(WorkflowVersion.class), any(), any());
+    }
+
+    @Test
+    void malformedVersionSysDataLogDoesNotExposePayload() {
+        String sentinel = "malformed-sys-data-secret-that-must-not-be-logged";
+        WorkflowVersion storedVersion = mock(WorkflowVersion.class);
+        when(storedVersion.getSysData()).thenReturn("{" + sentinel);
+        when(workflowVersionMapper.selectOne(any())).thenReturn(storedVersion);
+        Logger logger = (Logger) LoggerFactory.getLogger(WorkflowReleaseServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            Object result = ReflectionTestUtils.invokeMethod(
+                    workflowReleaseService, "getVersionSysData", 25, "v1.0");
+            assertThat(result).isNull();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        assertThat(appender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .anySatisfy(message -> assertThat(message)
+                        .contains("Failed to parse sysData JSON")
+                        .contains("sysDataLength=")
+                        .doesNotContain(sentinel))
+                .noneSatisfy(message -> assertThat(message).contains(sentinel));
     }
 }

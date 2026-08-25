@@ -1,4 +1,3 @@
-import json
 from typing import Any, Awaitable, Callable
 
 import aiohttp
@@ -6,6 +5,15 @@ from common.otlp.trace.span import Span
 from openai import BaseModel
 
 from agent.service.plugin.base import BasePlugin, PluginResponse
+from agent.service.plugin.skill_resource_security import (
+    MAX_SKILL_RESOURCE_BYTES,
+    MAX_SKILL_RESOURCE_COUNT,
+    MAX_SKILL_RESOURCE_TOTAL_BYTES,
+    MAX_SKILL_TEXT_BYTES,
+    SKILL_RESOURCE_ERROR,
+    download_skill_resource,
+    validate_skill_resource_url,
+)
 from agent.service.plugin.skill_sandbox import SkillSandboxConfig, SkillSandboxRunner
 
 
@@ -38,6 +46,10 @@ class SkillPluginFactory(BaseModel):
             resources = self._normalize_resources(skill.get("resources") or [])
             sandbox_config = self._normalize_sandbox_config(skill.get("sandbox"))
             if not (skill_id and name and download_url):
+                continue
+            try:
+                download_url = validate_skill_resource_url(download_url)
+            except RuntimeError:
                 continue
             plugins.extend(
                 [
@@ -89,30 +101,12 @@ class SkillPluginFactory(BaseModel):
         if not isinstance(raw_config, dict):
             return None
         return SkillSandboxConfig(
-            provider=str(raw_config.get("provider") or "e2b").strip().lower(),
             enabled=bool(raw_config.get("enabled")),
-            api_key=str(raw_config.get("api_key") or raw_config.get("apiKey") or ""),
-            timeout_seconds=int(
-                raw_config.get("timeout_seconds")
-                or raw_config.get("timeoutSeconds")
-                or 60
-            ),
-            allow_internet_access=bool(
-                raw_config.get("allow_internet_access")
-                or raw_config.get("allowInternetAccess")
-            ),
-            artifact_upload_url=str(
-                raw_config.get("artifact_upload_url")
-                or raw_config.get("artifactUploadUrl")
-                or ""
-            ).strip(),
-            artifact_upload_token=str(
-                raw_config.get("artifact_upload_token")
-                or raw_config.get("artifactUploadToken")
-                or ""
-            ),
             workflow_id=str(
-                raw_config.get("workflow_id") or raw_config.get("workflowId") or ""
+                raw_config.get("workflow_id")
+                or raw_config.get("workflowId")
+                or raw_config.get("flowId")
+                or ""
             ),
             run_id=str(raw_config.get("run_id") or raw_config.get("runId") or ""),
             node_id=str(raw_config.get("node_id") or raw_config.get("nodeId") or ""),
@@ -122,17 +116,34 @@ class SkillPluginFactory(BaseModel):
 
     def _normalize_resources(self, raw_resources: Any) -> list[SkillResource]:
         resources: list[SkillResource] = []
+        total_bytes = 0
+        seen_paths: set[str] = set()
         if not isinstance(raw_resources, list):
             return resources
         for item in raw_resources:
+            if len(resources) >= MAX_SKILL_RESOURCE_COUNT:
+                break
             if not isinstance(item, dict):
                 continue
             path = self._normalize_path(item.get("path"))
             download_url = str(
                 item.get("download_url") or item.get("downloadUrl") or ""
             ).strip()
-            if not (path and download_url):
+            try:
+                file_size = int(item.get("file_size") or item.get("fileSize") or 0)
+                download_url = validate_skill_resource_url(download_url)
+            except (TypeError, ValueError, RuntimeError):
                 continue
+            if (
+                not path
+                or path in seen_paths
+                or file_size < 0
+                or file_size > MAX_SKILL_RESOURCE_BYTES
+                or total_bytes + file_size > MAX_SKILL_RESOURCE_TOTAL_BYTES
+            ):
+                continue
+            seen_paths.add(path)
+            total_bytes += file_size
             resources.append(
                 SkillResource(
                     path=path,
@@ -141,7 +152,7 @@ class SkillPluginFactory(BaseModel):
                     file_ext=str(
                         item.get("file_ext") or item.get("fileExt") or ""
                     ).strip(),
-                    file_size=int(item.get("file_size") or item.get("fileSize") or 0),
+                    file_size=file_size,
                 )
             )
         return resources
@@ -161,9 +172,7 @@ class SkillPluginFactory(BaseModel):
                     {
                         "skill_id": skill_id,
                         "skill_name": name,
-                        "download_url": download_url,
                         "requested_path": requested_path,
-                        "action_input": json.dumps(action_input, ensure_ascii=False),
                     }
                 )
                 if requested_path:
@@ -234,6 +243,8 @@ class SkillPluginFactory(BaseModel):
     async def _download_text(self, url: str) -> str:
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as response:
-                response.raise_for_status()
-                return await response.text()
+            value = await download_skill_resource(session, url, MAX_SKILL_TEXT_BYTES)
+        try:
+            return value.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            raise RuntimeError(SKILL_RESOURCE_ERROR) from None

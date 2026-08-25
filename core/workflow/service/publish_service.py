@@ -16,6 +16,10 @@ from workflow.exception.e import CustomException
 from workflow.exception.errors.err_code import CodeEnum
 from workflow.extensions.otlp.trace.span import Span
 from workflow.service import app_service
+from workflow.utils.protocol_sanitization import (
+    sanitize_protocol,
+    sanitize_protocol_document_for_use,
+)
 
 
 async def handle(
@@ -118,6 +122,8 @@ async def _get_flow(session: Session, flow_id: str, span: Span) -> Any:
     if not db_flow:
         await span.add_info_event_async(f"Flow ID: {flow_id}")
         raise CustomException(CodeEnum.FLOW_NOT_FOUND_ERROR)
+    db_flow.data = sanitize_protocol_document_for_use(db_flow.data)
+    db_flow.release_data = sanitize_protocol_document_for_use(db_flow.release_data)
     return db_flow
 
 
@@ -219,17 +225,24 @@ def _update_flow_data(db_flow: Flow, publish_input: PublishInput) -> None:
     :param db_flow: The workflow object to update
     :param publish_input: Publishing input containing new data and operation type
     """
+    # Sanitize both legacy data already in the database and fresh publish payloads.
+    # Each assignment receives a separate deep copy so neither the Pydantic request nor
+    # the two ORM fields share mutable protocol containers.
+    db_flow.data = sanitize_protocol(db_flow.data)
+    db_flow.release_data = sanitize_protocol(db_flow.release_data)
+
     # For non-take-off operations, sync release_data with current data
     if publish_input.release_status != ReleaseStatus.TAKE_OFF:
-        db_flow.release_data = db_flow.data
+        db_flow.release_data = sanitize_protocol(db_flow.data)
     # For publish operations with new data, update both data and release_data
     if (
         publish_input.release_status
         in [ReleaseStatus.PUBLISH.value, ReleaseStatus.PUBLISH_API.value]
         and publish_input.data
     ):
-        db_flow.data = publish_input.data.model_dump(by_alias=True)
-        db_flow.release_data = publish_input.data.model_dump(by_alias=True)
+        publish_data = publish_input.data.model_dump(by_alias=True)
+        db_flow.data = sanitize_protocol(publish_data)
+        db_flow.release_data = sanitize_protocol(publish_data)
 
 
 def _handle_version(
@@ -266,8 +279,8 @@ def _handle_version(
             db_flow_backup = Flow(
                 group_id=db_flow.group_id,
                 name=db_flow.name,
-                data=db_flow.data,
-                release_data=db_flow.release_data,
+                data=sanitize_protocol(db_flow.data),
+                release_data=sanitize_protocol(db_flow.release_data),
                 description=db_flow.description,
                 version=publish_input.version,
                 release_status=db_flow.release_status,
@@ -280,8 +293,8 @@ def _handle_version(
         else:
             # Update existing versioned workflow with current data
             group_id_version_data.release_status = db_flow.release_status
-            group_id_version_data.data = db_flow.data
-            group_id_version_data.release_data = db_flow.release_data
+            group_id_version_data.data = sanitize_protocol(db_flow.data)
+            group_id_version_data.release_data = sanitize_protocol(db_flow.release_data)
 
     # Update release_status for all workflows with the same group_id
     session.execute(

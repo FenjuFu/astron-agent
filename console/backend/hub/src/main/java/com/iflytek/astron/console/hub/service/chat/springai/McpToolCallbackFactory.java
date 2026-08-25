@@ -12,6 +12,7 @@ import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -59,21 +60,27 @@ public class McpToolCallbackFactory {
             try {
                 args = StringUtils.isBlank(toolInput) ? new JSONObject() : JSON.parseObject(toolInput);
             } catch (Exception e) {
-                log.warn("Failed to parse MCP tool input as JSON, tool: {}, input: {}", tool.toolName(), toolInput);
+                log.warn(
+                        "Failed to parse MCP tool input as JSON, tool={}, inputBytes={}, errorType={}",
+                        tool.toolName(),
+                        toolInput == null ? 0 : toolInput.getBytes(StandardCharsets.UTF_8).length,
+                        e.getClass().getSimpleName());
                 args = new JSONObject();
             }
             String content;
             try {
                 content = mcpRuntimeToolService.callTool(tool, args);
             } catch (IOException e) {
-                log.warn("MCP tool call failed, tool: {}, error: {}", tool.toolName(), e.getMessage());
-                content = "MCP tool call failed: " + e.getMessage();
+                log.warn(
+                        "MCP tool call failed, tool={}, errorType={}",
+                        tool.toolName(),
+                        e.getClass().getSimpleName());
+                content = "MCP tool call failed.";
             }
             context.addTrace(new JSONObject()
                     .fluentPut("type", "mcp")
                     .fluentPut("deskToolName", "MCP: " + tool.toolName())
                     .fluentPut("toolName", tool.toolName())
-                    .fluentPut("serverUrl", tool.serverUrl())
                     .fluentPut("arguments", args)
                     .fluentPut("content", StringUtils.abbreviate(content, 2000)));
             return content;

@@ -62,6 +62,7 @@ from workflow.service import app_service, audit_service, flow_service
 from workflow.service.flow_service import set_flow_node_output_mode
 from workflow.service.history_service import get_history
 from workflow.service.ops_service import kafka_report
+from workflow.utils.trace_sanitization import serialize_trace_payload
 
 
 async def event_stream(
@@ -526,7 +527,7 @@ async def _run(
     ) as span_context:
         await span.add_info_event_async(f"user input: {chat_vo.json()}")
         await span.add_info_event_async(
-            f"spark dsl: {json.dumps(workflow_dsl, ensure_ascii=False)}"
+            f"spark dsl: {serialize_trace_payload(workflow_dsl)}"
         )
 
         workflow_trace = _init_workflow_trace(

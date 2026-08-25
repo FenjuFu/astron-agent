@@ -1,9 +1,8 @@
 package com.iflytek.astron.console.toolkit.service.workflow;
 
-import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.node.BizNodeData;
-import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxConfigDto;
+import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxRuntimeRefDto;
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.BizWorkflowNode;
 import com.iflytek.astron.console.toolkit.service.skill.SkillSandboxConfigService;
 import java.util.List;
@@ -17,6 +16,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,16 +36,12 @@ class WorkflowServiceSandboxConfigTest {
 
     @Test
     void injectScriptSandboxAddsRuntimeConfigToCodeNodes() {
-        SkillSandboxConfigDto config = new SkillSandboxConfigDto();
+        SkillSandboxRuntimeRefDto config = new SkillSandboxRuntimeRefDto();
         config.setProvider("e2b");
         config.setEnabled(Boolean.TRUE);
-        config.setApiKey("secret");
-        config.setTimeoutSeconds(60);
-        config.setAllowInternetAccess(Boolean.TRUE);
-        config.setArtifactUploadUrl("http://hub/workflow/artifacts/internal-upload");
-        config.setArtifactUploadToken("token");
+        config.setUid("user-1");
         config.setSpaceId(100L);
-        when(skillSandboxConfigService.toRuntimeDto()).thenReturn(config);
+        when(skillSandboxConfigService.toRuntimeRefDto()).thenReturn(config);
 
         BizWorkflowNode codeNode = new BizWorkflowNode();
         codeNode.setId("ifly-code::code-1");
@@ -62,19 +58,21 @@ class WorkflowServiceSandboxConfigTest {
         JSONObject sandbox = codeData.getNodeParam().getJSONObject("sandbox");
         assertThat(sandbox.getString("provider")).isEqualTo("e2b");
         assertThat(sandbox.getBoolean("enabled")).isTrue();
-        assertThat(sandbox.getString("apiKey")).isEqualTo("secret");
         assertThat(sandbox.getString("workflowId")).isEqualTo("flow-1");
         assertThat(sandbox.getString("nodeId")).isEqualTo("ifly-code::code-1");
         assertThat(sandbox.getString("spaceId")).isEqualTo("100");
+        assertThat(sandbox)
+                .doesNotContainKey("apiKey")
+                .doesNotContainKey("artifactUploadToken")
+                .doesNotContainKey("runtimeConfigUrl");
     }
 
     @Test
     void injectScriptSandboxSkipsCodeNodesWhenSandboxIsNotConfigured() {
-        SkillSandboxConfigDto config = new SkillSandboxConfigDto();
+        SkillSandboxRuntimeRefDto config = new SkillSandboxRuntimeRefDto();
         config.setProvider("e2b");
         config.setEnabled(Boolean.FALSE);
-        config.setApiKey("");
-        when(skillSandboxConfigService.toRuntimeDto()).thenReturn(config);
+        when(skillSandboxConfigService.toRuntimeRefDto()).thenReturn(config);
 
         BizWorkflowNode codeNode = new BizWorkflowNode();
         codeNode.setId("ifly-code::code-1");
@@ -92,8 +90,9 @@ class WorkflowServiceSandboxConfigTest {
     }
 
     @Test
-    void injectScriptSandboxSkipsCodeNodesWhenRuntimeConfigCannotBeResolved() {
-        when(skillSandboxConfigService.toRuntimeDto()).thenThrow(new RuntimeException("no user context"));
+    void injectScriptSandboxFailsClosedWhenRuntimeConfigCannotBeResolved() {
+        when(skillSandboxConfigService.toRuntimeRefDto())
+                .thenThrow(new RuntimeException("no user context"));
 
         BizWorkflowNode codeNode = new BizWorkflowNode();
         codeNode.setId("ifly-code::code-1");
@@ -101,24 +100,47 @@ class WorkflowServiceSandboxConfigTest {
         codeData.setNodeParam(new JSONObject());
         codeNode.setData(codeData);
 
-        ReflectionTestUtils.invokeMethod(
-                workflowService,
-                "injectScriptSandboxIntoCodeNodes",
-                List.of(codeNode),
-                "flow-1");
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                        workflowService,
+                        "injectScriptSandboxIntoCodeNodes",
+                        List.of(codeNode),
+                        "flow-1"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("no user context");
+    }
 
-        assertThat(codeData.getNodeParam().containsKey("sandbox")).isFalse();
+    @Test
+    void injectScriptSandboxFailsClosedWhenExplicitScopeCannotBeResolved() {
+        when(skillSandboxConfigService.toRuntimeRefDto("former-member", 200L))
+                .thenThrow(new RuntimeException("scope denied"));
+
+        BizWorkflowNode codeNode = new BizWorkflowNode();
+        codeNode.setId("ifly-code::code-1");
+        BizNodeData codeData = new BizNodeData();
+        codeData.setNodeParam(new JSONObject());
+        codeNode.setData(codeData);
+
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                        workflowService,
+                        "injectScriptSandboxIntoCodeNodes",
+                        List.of(codeNode),
+                        "flow-1",
+                        "former-member",
+                        200L))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("scope denied");
     }
 
     @Test
     void injectScriptSandboxUsesExplicitScopeWithoutRequestContext() {
         RequestContextHolder.resetRequestAttributes();
-        SkillSandboxConfigDto config = new SkillSandboxConfigDto();
+        SkillSandboxRuntimeRefDto config = new SkillSandboxRuntimeRefDto();
         config.setProvider("e2b");
         config.setEnabled(Boolean.TRUE);
-        config.setApiKey("approval-secret");
+        config.setUid("approval-user");
         config.setSpaceId(200L);
-        when(skillSandboxConfigService.toRuntimeDto("approval-user", 200L)).thenReturn(config);
+        when(skillSandboxConfigService.toRuntimeRefDto("approval-user", 200L))
+                .thenReturn(config);
 
         BizWorkflowNode codeNode = new BizWorkflowNode();
         codeNode.setId("ifly-code::approval-code");
@@ -135,30 +157,9 @@ class WorkflowServiceSandboxConfigTest {
                 200L);
 
         JSONObject sandbox = codeData.getNodeParam().getJSONObject("sandbox");
-        assertThat(sandbox.getString("apiKey")).isEqualTo("approval-secret");
+        assertThat(sandbox).doesNotContainKey("apiKey");
         assertThat(sandbox.getString("spaceId")).isEqualTo("200");
-        verify(skillSandboxConfigService).toRuntimeDto("approval-user", 200L);
-    }
-
-    @Test
-    void enrichCodeRunSandboxDropsClientControlledSandbox() {
-        SkillSandboxConfigDto config = new SkillSandboxConfigDto();
-        config.setEnabled(Boolean.FALSE);
-        config.setApiKey("");
-        when(skillSandboxConfigService.toRuntimeDto()).thenReturn(config);
-
-        JSONObject request = new JSONObject();
-        request.put("flow_id", "flow-1");
-        request.put("node_id", "ifly-code::code-1");
-        request.put("sandbox", new JSONObject()
-                .fluentPut("apiKey", "attacker-controlled")
-                .fluentPut("artifactUploadUrl", "http://internal-service"));
-
-        Object enriched = ReflectionTestUtils.invokeMethod(
-                workflowService, "enrichCodeRunSandbox", request);
-
-        assertThat(JSON.parseObject(JSON.toJSONString(enriched)))
-                .doesNotContainKey("sandbox");
+        verify(skillSandboxConfigService).toRuntimeRefDto("approval-user", 200L);
     }
 
     @Test

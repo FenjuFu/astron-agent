@@ -1,4 +1,5 @@
 import { typeList } from '@/constants';
+import KnowledgeNameText from '@/components/knowledge-name-text';
 import { FileItem } from '@/types/resource';
 import { generateType } from '@/utils/utils';
 import { useTranslation } from 'react-i18next';
@@ -66,11 +67,7 @@ export const useColumns = ({
                 />
               </div>
             )}
-            <span
-              className="text-second font-medium ml-1.5 text-overflow max-w-[500px]"
-              title={name}
-              dangerouslySetInnerHTML={{ __html: name }}
-            ></span>
+            <KnowledgeNameText name={name} />
             {record.type === 'folder' && (
               <img src={rightarow} className="w-5 h-5 ml-1" alt="" />
             )}

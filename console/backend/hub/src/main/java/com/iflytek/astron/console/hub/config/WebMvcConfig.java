@@ -14,11 +14,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
             "/actuator/**",
             "/swagger-ui/**",
             "/v3/api-docs/**",
-            "/workflow/copyFlow",
             "/api/model/checkModelBase",
-            "/workflow/hasQaNode",
-            "/workflow/artifacts/internal-upload",
-            "/workflow/version/update_channel_result",
             "/internal/gateway/auth/**",
             "/home-page/agent-square/**",
             "/error"

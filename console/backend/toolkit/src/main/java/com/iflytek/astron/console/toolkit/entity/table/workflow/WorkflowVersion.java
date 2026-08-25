@@ -1,6 +1,7 @@
 package com.iflytek.astron.console.toolkit.entity.table.workflow;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.iflytek.astron.console.commons.util.WorkflowProtocolSanitizer;
 import lombok.Data;
 
 import java.util.Date;
@@ -33,4 +34,12 @@ public class WorkflowVersion {
     String advancedConfig;
     @TableField(exist = false)
     String flowConfig;
+
+    public void setData(String data) {
+        this.data = WorkflowProtocolSanitizer.sanitize(data);
+    }
+
+    public void setSysData(String sysData) {
+        this.sysData = WorkflowProtocolSanitizer.sanitizeSystemProtocol(sysData);
+    }
 }

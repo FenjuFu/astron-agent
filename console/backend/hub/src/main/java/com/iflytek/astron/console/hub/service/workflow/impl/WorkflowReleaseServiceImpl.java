@@ -1,5 +1,6 @@
 package com.iflytek.astron.console.hub.service.workflow.impl;
 
+import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.enums.bot.ReleaseTypeEnum;
 import com.iflytek.astron.console.commons.service.data.UserLangChainDataService;
 import com.iflytek.astron.console.commons.mapper.bot.ChatBotApiMapper;
@@ -98,7 +99,14 @@ public class WorkflowReleaseServiceImpl implements WorkflowReleaseService {
             syncToApiSystem(botId, flowId, versionName, appId);
 
             // 6. Update audit result to success
-            updateAuditResult(response.getWorkflowVersionId(), WorkflowConst.PublishResult.SUCCESS);
+            if (!updateAuditResult(
+                    response.getWorkflowVersionId(),
+                    flowId,
+                    WorkflowConst.PublishResult.SUCCESS,
+                    uid,
+                    spaceId)) {
+                throw new BusinessException(ResponseEnum.WORKFLOW_VERSION_PUBLISH_FAILED);
+            }
 
             log.info("Workflow bot publish and sync successful: botId={}, versionId={}, versionName={}",
                     botId, response.getWorkflowVersionId(), response.getWorkflowVersionName());
@@ -259,8 +267,12 @@ public class WorkflowReleaseServiceImpl implements WorkflowReleaseService {
                     JSONObject versionData = JSON.parseObject(sysData);
                     return versionData == null || versionData.isEmpty() ? null : versionData;
                 } catch (Exception e) {
-                    log.error("Failed to parse sysData JSON: botId={}, versionName={}, sysData={}",
-                            botId, versionName, sysData, e);
+                    log.error(
+                            "Failed to parse sysData JSON: botId={}, versionName={}, sysDataLength={}",
+                            botId,
+                            versionName,
+                            sysData.length(),
+                            e);
                     return null;
                 }
             }
@@ -278,7 +290,8 @@ public class WorkflowReleaseServiceImpl implements WorkflowReleaseService {
     /**
      * Update audit result
      */
-    private boolean updateAuditResult(Long versionId, String auditResult) {
+    private boolean updateAuditResult(
+            Long versionId, String flowId, String auditResult, String executionUid, Long executionSpaceId) {
         if (versionId == null) {
             log.warn("Version ID is null, skipping audit result update");
             return false;
@@ -289,8 +302,10 @@ public class WorkflowReleaseServiceImpl implements WorkflowReleaseService {
 
             WorkflowVersion update = new WorkflowVersion();
             update.setId(versionId);
+            update.setFlowId(flowId);
             update.setPublishResult(auditResult);
-            var response = versionService.update_channel_result(update);
+            var response = versionService.updateChannelResultForBoundBotPublish(
+                    update, executionUid, executionSpaceId);
             if (response != null && response.code() == 0) {
                 log.info("Successfully updated audit result: versionId={}, auditResult={}", versionId, auditResult);
                 return true;

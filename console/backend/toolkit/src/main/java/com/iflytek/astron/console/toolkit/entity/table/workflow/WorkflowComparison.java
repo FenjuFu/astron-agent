@@ -1,6 +1,7 @@
 package com.iflytek.astron.console.toolkit.entity.table.workflow;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.iflytek.astron.console.commons.util.WorkflowProtocolSanitizer;
 import lombok.Data;
 
 import java.util.Date;
@@ -23,4 +24,8 @@ public class WorkflowComparison {
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private Date updateTime;
+
+    public void setData(String data) {
+        this.data = WorkflowProtocolSanitizer.sanitize(data);
+    }
 }

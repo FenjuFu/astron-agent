@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -69,23 +70,14 @@ class VersionControllerTest {
         assertThat(flowIdCaptor.getValue()).isEqualTo("flow-1");
     }
 
-    /**
-     * Test the normal case of {@code /list-botId(botId)} endpoint.
-     * <p>
-     * Should delegate to {@link VersionService#list_botId_Page(Page, String)} correctly.
-     * </p>
-     */
     @Test
-    @DisplayName("list-botId(botId) - normal return")
-    void listBotId_shouldDelegateAndReturn() {
-        Page<WorkflowVersion> page = new Page<>(2, 5);
-        Object expected = new Object();
-        when(versionService.list_botId_Page(page, "bot-1")).thenReturn(expected);
+    @DisplayName("execution protocol endpoints are not exposed by the public controller")
+    void executionProtocolEndpointsAreNotExposed() {
+        List<String> controllerMethods = Arrays.stream(VersionController.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName)
+                .toList();
 
-        Object result = controller.list_botId(page, "bot-1");
-
-        assertThat(result).isSameAs(expected);
-        verify(versionService).list_botId_Page(page, "bot-1");
+        assertThat(controllerMethods).doesNotContain("list_botId", "getVersionSysData");
     }
 
     /**
@@ -183,27 +175,6 @@ class VersionControllerTest {
         when(versionService.getMaxVersion("bot-9")).thenReturn(expected);
 
         Object result = controller.getMaxVersion("bot-9");
-    }
-
-    /**
-     * Test {@code /get-version-sys-data}.
-     * <p>
-     * Should delegate to {@link VersionService#getVersionSysData(WorkflowVersion)} and return the
-     * result.
-     * </p>
-     */
-    @Test
-    @DisplayName("get-version-sys-data - normal return")
-    void getVersionSysData_shouldDelegateAndReturn() {
-        WorkflowVersion dto = new WorkflowVersion();
-        @SuppressWarnings("unchecked")
-        ApiResult<JSONObject> expected = (ApiResult<JSONObject>) mock(ApiResult.class);
-        when(versionService.getVersionSysData(dto)).thenReturn(expected);
-
-        Object versionSysData = controller.getVersionSysData(dto);
-
-        assertThat(versionSysData).isSameAs(expected);
-        verify(versionService).getVersionSysData(dto);
     }
 
     /**

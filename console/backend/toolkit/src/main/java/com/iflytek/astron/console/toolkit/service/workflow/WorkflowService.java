@@ -73,7 +73,7 @@ import com.iflytek.astron.console.toolkit.entity.table.relation.FlowRepoRel;
 import com.iflytek.astron.console.toolkit.entity.table.relation.FlowToolRel;
 import com.iflytek.astron.console.toolkit.entity.table.repo.FileInfoV2;
 import com.iflytek.astron.console.toolkit.entity.table.repo.Repo;
-import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxConfigDto;
+import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxRuntimeRefDto;
 import com.iflytek.astron.console.toolkit.entity.table.tool.*;
 import com.iflytek.astron.console.toolkit.entity.table.workflow.*;
 import com.iflytek.astron.console.toolkit.entity.tool.McpServerTool;
@@ -154,6 +154,8 @@ import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -248,6 +250,8 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     FlowProtocolTempMapper flowProtocolTempMapper;
     @Autowired
     WorkflowMapper workflowMapper;
+    @Autowired
+    WorkflowArtifactService workflowArtifactService;
     @Autowired
     NodeInfoMapper nodeInfoMapper;
     @Autowired
@@ -964,7 +968,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
                 return null;
             }
 
-            dataPermissionCheckTool.checkWorkflowBelong(workflow, SpaceInfoUtil.getSpaceId());
+            dataPermissionCheckTool.checkWorkflowVisible(workflow, SpaceInfoUtil.getSpaceId());
 
             WorkflowVersion workflowVersion = workflowVersionMapper.selectOne(
                     Wrappers.lambdaQuery(WorkflowVersion.class)
@@ -986,6 +990,8 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             vo.setVersion(workflowVersion.getName());
             vo.setData(workflowVersion.getData());
             return vo;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Query workflow maximum version number exception, flowId: {}", flowId, e);
             throw new BusinessException(ResponseEnum.WORKFLOW_VERSION_GET_MAX_FAILED);
@@ -1182,7 +1188,9 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         replica.setAppUpdatable(false);
         replica.setOrder(DEFAULT_ORDER);
         replica.setExt(null);
-        save(replica);
+        if (!save(replica)) {
+            throw new BusinessException(ResponseEnum.INTERNAL_SERVER_ERROR);
+        }
         Integer botId = openPlatformService.syncWorkflowClone(uid, src.getId(), replica.getId(), replica.getFlowId(), spaceId);
         JSONObject result = new JSONObject();
         if (result != null) {
@@ -1266,7 +1274,9 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         jsonData.put("botId", botId);
         // Update botId
         replica.setExt(jsonData.toJSONString());
-        save(replica);
+        if (!save(replica)) {
+            throw new BusinessException(ResponseEnum.INTERNAL_SERVER_ERROR);
+        }
         // New configuration information for voice intelligent agents
         if (Objects.equals(BotTypeEnum.TALK.getType(), flowType)) {
             WorkflowConfig config = new WorkflowConfig();
@@ -1288,7 +1298,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         }
         // Fix appId
         if (!commonConfig.getAppId().equals(replica.getAppId())) {
-            replaceAppId(commonConfig.getAppId(), replica.getFlowId());
+            replaceAppIdAfterAuthorization(commonConfig.getAppId(), replica);
         }
         return replica;
     }
@@ -1321,9 +1331,11 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     public Workflow updateInfo(WorkflowReq updateDto) {
         final Long headSpaceId = SpaceInfoUtil.getSpaceId();
         final Long apiSpaceId = updateDto.getSpaceId();
-        final Long spaceId = headSpaceId != null ? (apiSpaceId == null ? headSpaceId : apiSpaceId) : apiSpaceId;
+        if (apiSpaceId != null && !Objects.equals(apiSpaceId, headSpaceId)) {
+            throw new BusinessException(ResponseEnum.INSUFFICIENT_PERMISSIONS);
+        }
 
-        updateDto.setSpaceId(spaceId);
+        updateDto.setSpaceId(headSpaceId);
         Workflow workflow = saveLocal(updateDto);
 
         // Sync to core: only sync basic elements, protocol is synced during build
@@ -1354,40 +1366,56 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
         // 3) Call core build (SSE)
         String url = apiUrl.getWorkflow().concat(PROTOCOL_BUILD_PATH).concat(workflow.getFlowId());
-        log.info("workflow protocol build, url = {}", url);
+        log.info("workflow protocol build, url = {}, flowId = {}", url, workflow.getFlowId());
 
         Request request = new Request.Builder().url(url).post(Util.EMPTY_REQUEST).build();
         CountDownLatch latch = new CountDownLatch(1);
-        JSONObject wholeRespJson = new JSONObject();
+        AtomicReference<Integer> buildStatus = new AtomicReference<>();
+        AtomicBoolean invalidResponse = new AtomicBoolean();
+        AtomicBoolean requestFailed = new AtomicBoolean();
 
         RealEventSource realEventSource = new RealEventSource(request, new EventSourceListener() {
             @Override
             public void onOpen(@NotNull EventSource eventSource, @NotNull Response response) {
-                log.info("build onOpen, response = {}", response);
+                log.info(
+                        "workflow protocol build opened, url = {}, flowId = {}, httpCode = {}",
+                        url,
+                        workflow.getFlowId(),
+                        response.code());
             }
 
             @Override
             public void onEvent(@NotNull EventSource eventSource, String id, String type, @NotNull String data) {
-                log.info("build response data = {}", data);
-                wholeRespJson.putAll(JSON.parseObject(data));
+                try {
+                    Integer status = parseBuildEventStatus(data, url, workflow.getFlowId());
+                    if (status != null) {
+                        buildStatus.set(status);
+                    }
+                } catch (BusinessException exception) {
+                    invalidResponse.set(true);
+                }
             }
 
             @Override
             public void onClosed(@NotNull EventSource eventSource) {
-                log.info("build onClosed");
+                log.info(
+                        "workflow protocol build closed, url = {}, flowId = {}",
+                        url,
+                        workflow.getFlowId());
                 latch.countDown();
             }
 
             @Override
             public void onFailure(@NotNull EventSource eventSource, Throwable t, Response response) {
                 try {
-                    if (t instanceof java.net.SocketTimeoutException) {
-                        log.error("build onFailure (timeout), res = {}", response, t);
-                    } else if (t != null) {
-                        log.error("build onFailure, res = {}", response, t);
-                    } else {
-                        log.error("build onFailure, res = {}, error = <null Throwable>", response);
-                    }
+                    requestFailed.set(true);
+                    log.error(
+                            "workflow protocol build failed, url = {}, flowId = {}, httpCode = {}, errorType = {}, timeout = {}",
+                            url,
+                            workflow.getFlowId(),
+                            response == null ? null : response.code(),
+                            t == null ? "Unknown" : t.getClass().getSimpleName(),
+                            t instanceof java.net.SocketTimeoutException);
                 } finally {
                     latch.countDown();
                 }
@@ -1396,16 +1424,46 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         try {
             realEventSource.connect(OkHttpUtil.getHttpClient());
             latch.await();
-            String message = wholeRespJson.getString("message");
-            if (StringUtils.isNotBlank(message)) {
-                int code = Integer.parseInt(message.substring(0, message.indexOf(":")));
-                if (code != 0)
-                    throw new BusinessException(ResponseEnum.RESPONSE_FAILED, message);
+            if (requestFailed.get() || invalidResponse.get()) {
+                throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+            }
+            Integer code = buildStatus.get();
+            if (code != null && code != 0) {
+                throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
             }
             return ApiResult.success();
         } finally {
             // Prevent leaks
             realEventSource.cancel();
+        }
+    }
+
+    private Integer parseBuildEventStatus(String data, String url, String flowId) {
+        int eventBytes = data == null ? 0 : data.getBytes(StandardCharsets.UTF_8).length;
+        log.info(
+                "workflow protocol build event, url = {}, flowId = {}, eventBytes = {}",
+                url,
+                flowId,
+                eventBytes);
+        try {
+            JSONObject event = JSON.parseObject(data);
+            String message = event == null ? null : event.getString("message");
+            if (StringUtils.isBlank(message)) {
+                return null;
+            }
+            int separator = message.indexOf(':');
+            if (separator <= 0) {
+                throw new IllegalArgumentException("Invalid build status format");
+            }
+            return Integer.parseInt(message.substring(0, separator));
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "workflow protocol build event parse failed, url = {}, flowId = {}, eventBytes = {}, errorType = {}",
+                    url,
+                    flowId,
+                    eventBytes,
+                    exception.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
     }
 
@@ -1418,6 +1476,12 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
      * @return Debug result
      */
     public ApiResult<Object> nodeDebug(String nodeId, WorkflowDebugDto debugDto) {
+        BizWorkflowNode node = prepareNodeDebug(debugDto);
+        injectScriptSandboxIntoCodeNodes(List.of(node), debugDto.getFlowId());
+        return executeNodeDebug(nodeId, debugDto);
+    }
+
+    private BizWorkflowNode prepareNodeDebug(WorkflowDebugDto debugDto) {
         // The submitted payload contains only the node being debugged and is fully client
         // controlled. Authorize the workflow and validate the complete persisted draft first so
         // callers cannot omit an unresolved imported node or strip its marker to reach core.
@@ -1430,6 +1494,9 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         String prefix = node.getId().split("::")[0];
         String type = node.getType();
         BizNodeData bizNodeData = node.getData();
+        // Never trust a sandbox block submitted by the browser. It is rebuilt only after workflow
+        // authorization and cannot survive an unrelated enrichment failure.
+        bizNodeData.getNodeParam().remove("sandbox");
 
         // Fill app/ak/sk
         String appId = bizNodeData.getNodeParam().getString("appId");
@@ -1463,17 +1530,21 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             }
             checkAndEditData(bizNodeData, prefix);
             fixOnRepoNode(type, bizNodeData, prefix);
-            injectScriptSandboxIntoCodeNodes(List.of(node), debugDto.getFlowId());
-        } catch (Exception ignored) {
+        } catch (RuntimeException exception) {
             if (!node.getId().startsWith(WorkflowConst.NodeType.FLOW)
                     && CommonConst.FIXED_APPID_ENV.contains(env)) {
                 buidKeyInfo(bizNodeData);
                 checkAndEditData(bizNodeData, prefix);
                 fixOnRepoNode(type, bizNodeData, prefix);
-                injectScriptSandboxIntoCodeNodes(List.of(node), debugDto.getFlowId());
+            } else {
+                throw exception;
             }
         }
+        return node;
+    }
 
+    private ApiResult<Object> executeNodeDebug(String nodeId, WorkflowDebugDto debugDto) {
+        BizWorkflowData bizWorkflowData = debugDto.getData();
         // Build core protocol
         FlowProtocol protocol = new FlowProtocol();
         org.springframework.beans.BeanUtils.copyProperties(debugDto, protocol);
@@ -1486,18 +1557,40 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         String url = apiUrl.getWorkflow().concat(NODE_DEBUG_PATH);
         String body = JSON.toJSONString(protocol);
 
-        log.info("node debug, url = {}, body = {}", url, body);
+        log.info(
+                "node debug request, url = {}, flowId = {}, nodeId = {}, bodyBytes = {}",
+                url,
+                debugDto.getFlowId(),
+                nodeId,
+                body.getBytes(StandardCharsets.UTF_8).length);
         String response = OkHttpUtil.post(url, workflowInternalHeaders(), body);
-        log.info("node debug, response = {}", response);
-
-        NodeDebugResponse nodeDebugResponse = null;
+        int responseBytes = response == null
+                ? 0
+                : response.getBytes(StandardCharsets.UTF_8).length;
+        NodeDebugResponse nodeDebugResponse;
         try {
             nodeDebugResponse = JSON.parseObject(response, NodeDebugResponse.class);
-        } catch (Exception e) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, response);
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "node debug response parse failed, url = {}, flowId = {}, nodeId = {}, bodyBytes = {}, errorType = {}",
+                    url,
+                    debugDto.getFlowId(),
+                    nodeId,
+                    responseBytes,
+                    exception.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
-        if (nodeDebugResponse.getCode() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, nodeDebugResponse.getMessage());
+        log.info(
+                "node debug response, url = {}, flowId = {}, nodeId = {}, bodyBytes = {}, statusCode = {}",
+                url,
+                debugDto.getFlowId(),
+                nodeId,
+                responseBytes,
+                nodeDebugResponse == null ? null : nodeDebugResponse.getCode());
+        if (nodeDebugResponse == null
+                || nodeDebugResponse.getCode() == null
+                || nodeDebugResponse.getCode() != 0) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
         return ApiResult.success(nodeDebugResponse.getData());
     }
@@ -1514,14 +1607,32 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         if (id == null)
             return ApiResult.error(ResponseEnum.PARAM_MISS);
 
-        Workflow workflow = getById(id);
+        Long currentSpaceId = SpaceInfoUtil.getSpaceId();
+        if (spaceId != null && !Objects.equals(spaceId, currentSpaceId)) {
+            throw new BusinessException(ResponseEnum.INSUFFICIENT_PERMISSIONS);
+        }
+
+        Workflow workflow = workflowMapper.selectOne(Wrappers.lambdaQuery(Workflow.class)
+                .eq(Workflow::getId, id)
+                .eq(Workflow::getDeleted, false)
+                .last("limit 1"));
         if (workflow == null)
             throw new BusinessException(ResponseEnum.WORKFLOW_NOT_EXIST);
 
-        dataPermissionCheckTool.checkWorkflowBelong(workflow, spaceId);
+        assertTopLevelWorkflowExecutableByCurrentUser(workflow);
 
+        int updated = workflowMapper.update(
+                null,
+                Wrappers.lambdaUpdate(Workflow.class)
+                        .eq(Workflow::getId, id)
+                        .eq(Workflow::getDeleted, false)
+                        .set(Workflow::getDeleted, true)
+                        .set(Workflow::getUpdateTime, new Date()));
+        if (updated != 1) {
+            throw new BusinessException(ResponseEnum.INTERNAL_SERVER_ERROR);
+        }
         workflow.setDeleted(true);
-        updateById(workflow);
+        workflowArtifactService.tombstoneWorkflowArtifacts(id);
 
         String flowId = workflow.getFlowId();
         if (flowId != null) {
@@ -1737,13 +1848,21 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
                 .fluentPut("description", workflowReq.getDescription())
                 .fluentPut("data", null)
                 .toString();
-        log.info("workflow protocol add, url = {}, body = {}", url, body);
+        log.info(
+                "workflow protocol add request, url = {}, bodyBytes = {}",
+                url,
+                body.getBytes(StandardCharsets.UTF_8).length);
 
         String response = OkHttpUtil.post(url, body);
-        log.info("workflow protocol add, response = {}", response);
-
         Result<?> result = JSON.parseObject(response, Result.class);
-        if (result.getCode() != 0) {
+        log.info(
+                "workflow protocol add response, url = {}, statusCode = {}",
+                url,
+                result == null ? null : result.getCode());
+        if (result == null) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
+        if (result.getCode() == null || result.getCode() != 0) {
             throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.getMessage());
         }
         JSONObject jsonObject = JSON.parseObject(String.valueOf(result.getData()));
@@ -1769,12 +1888,19 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
                 .fluentPut("app_id", appId)
                 .fluentPut("flow_id", flowId)
                 .toString();
-        log.info("workflow protocol delete, url = {}, body = {}", url, body);
+        log.info(
+                "workflow protocol delete request, url = {}, flowId = {}, bodyBytes = {}",
+                url,
+                flowId,
+                body.getBytes(StandardCharsets.UTF_8).length);
 
         String response = OkHttpUtil.post(url, body);
-        log.info("workflow protocol delete, response = {}", response);
-
         Result<?> result = JSON.parseObject(response, Result.class);
+        log.info(
+                "workflow protocol delete response, url = {}, flowId = {}, statusCode = {}",
+                url,
+                flowId,
+                result == null ? null : result.getCode());
         if (result == null || result.getCode() == null || result.getCode() != 0) {
             String message = result == null || StringUtils.isBlank(result.getMessage())
                     ? "Core workflow protocol deletion failed"
@@ -1849,7 +1975,10 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         if (workflow == null) {
             throw new BusinessException(ResponseEnum.WORKFLOW_NOT_EXIST);
         }
-        dataPermissionCheckTool.checkWorkflowVisible(workflow, saveReq.getSpaceId());
+        if (!Objects.equals(saveReq.getSpaceId(), SpaceInfoUtil.getSpaceId())) {
+            throw new BusinessException(ResponseEnum.INSUFFICIENT_PERMISSIONS);
+        }
+        assertTopLevelWorkflowExecutableByCurrentUser(workflow);
         return workflow;
     }
 
@@ -1879,18 +2008,27 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         if (saveReq.getAdvancedConfig() == null) {
             return;
         }
+        String originalConfig = workflow.getAdvancedConfig();
+        int originalBytes = originalConfig == null
+                ? 0
+                : originalConfig.getBytes(StandardCharsets.UTF_8).length;
+        int updateBytes = -1;
         try {
             ObjectMapper mapper = new ObjectMapper();
-            ObjectNode original = workflow.getAdvancedConfig() == null
+            ObjectNode original = originalConfig == null
                     ? mapper.createObjectNode()
-                    : (ObjectNode) mapper.readTree(workflow.getAdvancedConfig());
-            ObjectNode updateNode = (ObjectNode) mapper.readTree(new JSONObject(saveReq.getAdvancedConfig()).toJSONString());
+                    : (ObjectNode) mapper.readTree(originalConfig);
+            String updateConfig = new JSONObject(saveReq.getAdvancedConfig()).toJSONString();
+            updateBytes = updateConfig.getBytes(StandardCharsets.UTF_8).length;
+            ObjectNode updateNode = (ObjectNode) mapper.readTree(updateConfig);
             mergeJsonNodes(original, updateNode);
             workflow.setAdvancedConfig(mapper.writeValueAsString(original));
         } catch (Exception ex) {
-            log.error("update advancedConfig error, original:{}, update:{}, error:{}",
-                    workflow.getAdvancedConfig(),
-                    new JSONObject(saveReq.getAdvancedConfig()).toJSONString(), ex);
+            log.error(
+                    "update advancedConfig failed, originalBytes = {}, updateBytes = {}, errorType = {}",
+                    originalBytes,
+                    updateBytes,
+                    ex.getClass().getSimpleName());
             throw new BusinessException(ResponseEnum.WORKFLOW_HIGH_PARAM_FAILED);
         }
     }
@@ -3206,7 +3344,10 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             }
             return result;
         } catch (Exception e) {
-            log.warn("Failed to parse bot MCP server urls: {}", mcpServerUrls, e);
+            log.warn(
+                    "Failed to parse bot MCP server urls, bodyBytes = {}, errorType = {}",
+                    mcpServerUrls.getBytes(StandardCharsets.UTF_8).length,
+                    e.getClass().getSimpleName());
             return List.of();
         }
     }
@@ -3349,9 +3490,16 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
         logWorkflowProtocolUpdate(url, flowId, body, protocolJson);
         String response = OkHttpUtil.post(url, body);
-        log.info("workflow protocol update, response = {}", response);
         Result<?> result = JSON.parseObject(response, Result.class);
-        if (result.getCode() != 0) {
+        log.info(
+                "workflow protocol update response, url = {}, flowId = {}, statusCode = {}",
+                url,
+                flowId,
+                result == null ? null : result.getCode());
+        if (result == null) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
+        if (result.getCode() == null || result.getCode() != 0) {
             throw new BusinessException(ResponseEnum.RESPONSE_FAILED, result.getMessage());
         }
 
@@ -3449,27 +3597,59 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     public Object runCode(Object runCodeData) {
         String url = apiUrl.getWorkflow() + CODE_RUN_PATH;
         Object payload = enrichCodeRunSandbox(runCodeData);
-        log.info("code run, url = {}, data = {}", url, payload);
+        JSONObject payloadJson = (JSONObject) payload;
+        String flowId = StringUtils.trimToEmpty(payloadJson.getString("flow_id"));
+        String nodeId = StringUtils.trimToEmpty(payloadJson.getString("node_id"));
         String body = JSON.toJSONString(payload);
+        log.info(
+                "code run request, url = {}, flowId = {}, nodeId = {}, bodyBytes = {}",
+                url,
+                flowId,
+                nodeId,
+                body.getBytes(StandardCharsets.UTF_8).length);
 
         // body = StringEscapeUtils.unescapeJava(body);
 
         String resp = OkHttpUtil.post(url, workflowInternalHeaders(), body);
-        log.info("code run, resp = {}", resp);
-        return JSON.parseObject(resp, Result.class);
+        int responseBytes = resp == null ? 0 : resp.getBytes(StandardCharsets.UTF_8).length;
+        final Result<?> result;
+        try {
+            result = JSON.parseObject(resp, Result.class);
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "code run response parse failed, url = {}, flowId = {}, nodeId = {}, bodyBytes = {}, errorType = {}",
+                    url,
+                    flowId,
+                    nodeId,
+                    responseBytes,
+                    exception.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
+        log.info(
+                "code run response, url = {}, flowId = {}, nodeId = {}, bodyBytes = {}, statusCode = {}",
+                url,
+                flowId,
+                nodeId,
+                responseBytes,
+                result == null ? null : result.getCode());
+        if (result == null) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
+        return result;
     }
 
     private Object enrichCodeRunSandbox(Object runCodeData) {
         JSONObject payload = JSON.parseObject(JSON.toJSONString(runCodeData));
         // Never accept sandbox credentials or upload targets from the client.
         payload.remove("sandbox");
+        String flowId = StringUtils.trimToEmpty(payload.getString("flow_id"));
+        Assert.notEmpty(flowId);
+        loadWorkflowForDebugExecution(flowId);
+        String executionUid = UserInfoManagerHandler.getUserId();
+        Long executionSpaceId = SpaceInfoUtil.getSpaceId();
         JSONObject sandbox = buildRuntimeSandbox(
-                payload.getString("flow_id"),
-                payload.getString("node_id"));
+                flowId, payload.getString("node_id"), executionUid, executionSpaceId);
         if (sandbox != null) {
-            if (StringUtils.isBlank(sandbox.getString("uid"))) {
-                sandbox.put("uid", payload.getString("uid"));
-            }
             payload.put("sandbox", sandbox);
         }
         return payload;
@@ -3515,18 +3695,13 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
     private JSONObject buildRuntimeSandbox(
             String flowId, String nodeId, String executionUid, Long executionSpaceId) {
-        SkillSandboxConfigDto sandboxConfig;
-        try {
-            sandboxConfig = executionUid == null
-                    ? skillSandboxConfigService.toRuntimeDto()
-                    : skillSandboxConfigService.toRuntimeDto(executionUid, executionSpaceId);
-        } catch (Exception ex) {
-            log.warn("Skip injecting code sandbox config, flowId={}, nodeId={}, reason={}", flowId, nodeId, ex.getMessage());
-            return null;
-        }
+        // Sandbox lookup is an isolation boundary. Propagate configuration, database, and scope
+        // failures so execution cannot silently fall back to the in-process local executor.
+        SkillSandboxRuntimeRefDto sandboxConfig = executionUid == null
+                ? skillSandboxConfigService.toRuntimeRefDto()
+                : skillSandboxConfigService.toRuntimeRefDto(executionUid, executionSpaceId);
         if (sandboxConfig == null
-                || !Boolean.TRUE.equals(sandboxConfig.getEnabled())
-                || StringUtils.isBlank(sandboxConfig.getApiKey())) {
+                || !Boolean.TRUE.equals(sandboxConfig.getEnabled())) {
             return null;
         }
         JSONObject sandbox = JSON.parseObject(JSON.toJSONString(sandboxConfig));
@@ -3949,8 +4124,17 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     }
 
     public Object clearDialog(Long workflowId, Integer type) {
+        Workflow workflow = workflowMapper.selectOne(Wrappers.lambdaQuery(Workflow.class)
+                .eq(Workflow::getId, workflowId)
+                .eq(Workflow::getDeleted, false)
+                .last("limit 1"));
+        if (workflow == null) {
+            throw new BusinessException(ResponseEnum.WORKFLOW_NOT_EXIST);
+        }
+        assertTopLevelWorkflowExecutableByCurrentUser(workflow);
         return workflowDialogMapper.update(Wrappers.lambdaUpdate(WorkflowDialog.class)
                 .eq(WorkflowDialog::getWorkflowId, workflowId)
+                .eq(WorkflowDialog::getUid, UserInfoManagerHandler.getUserId())
                 .eq(WorkflowDialog::getType, type)
                 .set(WorkflowDialog::getDeleted, true));
     }
@@ -4130,7 +4314,12 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             String reqBody = JacksonUtil.toJSONString(sysReq, JacksonUtil.NON_NULL_OBJECT_MAPPER);
 
             SseEmitter sseEmitter = SseEmitterUtil.create(bizReq.getChatId(), 1800_000L);
-            log.info("[SSE]workflow chat url = {}, headers = {}, reqBody = {}", url, headerMap, reqBody);
+            log.info(
+                    "[SSE] workflow chat request, url={}, flowId={}, chatId={}, bodyBytes={}",
+                    url,
+                    flowId,
+                    bizReq.getChatId(),
+                    reqBody.getBytes(StandardCharsets.UTF_8).length);
             WorkflowSseEventSourceListener listener = new WorkflowSseEventSourceListener(flowId, bizReq.getChatId(), bizReq.getOutputType(), bizReq.getPromptDebugger(), bizReq.getVersion());
             OkHttpUtil.connectRealEventSource(url, headerMap, reqBody, listener);
 
@@ -4188,7 +4377,12 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             String reqBody = JacksonUtil.toJSONString(sysReq, JacksonUtil.NON_NULL_OBJECT_MAPPER);
 
             SseEmitter sseEmitter = SseEmitterUtil.create(bizReq.getEventId(), 1800_000L);
-            log.info("[SSE]workflow resume url = {}, headers = {}, reqBody = {}", url, headerMap, reqBody);
+            log.info(
+                    "[SSE] workflow resume request, url={}, flowId={}, eventId={}, bodyBytes={}",
+                    url,
+                    flowId,
+                    bizReq.getEventId(),
+                    reqBody.getBytes(StandardCharsets.UTF_8).length);
             WorkflowSseEventSourceListener listener = new WorkflowSseEventSourceListener(flowId, bizReq.getEventId(), bizReq.getOutputType(), bizReq.getPromptDebugger(), bizReq.getVersion());
             OkHttpUtil.connectRealEventSource(url, headerMap, reqBody, listener);
 
@@ -4771,28 +4965,35 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
 
     public Object replaceAppId(String appId, String flowId) {
-        log.info("replace appid {}, origin flowId:{}", appId, flowId);
-        Workflow one = this.getOne(new LambdaQueryWrapper<Workflow>().eq(Workflow::getFlowId, flowId));
-        if (one == null) {
-            throw new BusinessException(ResponseEnum.WORKFLOW_NOT_EXIST);
-        }
+        log.info("replace appid for flowId={}", flowId);
+        Workflow workflow = requireOwnedWorkflow(flowId);
+        replaceAppIdAfterAuthorization(appId, workflow);
+        return ApiResult.success(true);
+    }
+
+    private void replaceAppIdAfterAuthorization(String appId, Workflow workflow) {
         if (StringUtils.isBlank(appId)) {
             throw new BusinessException(ResponseEnum.APPID_CANNOT_EMPTY);
         }
-        String data = one.getData();
-        if (StringUtils.isNotBlank(data)) {
-            String newData = data.replaceAll(one.getAppId(), appId);
-            one.setData(newData);
+        if (workflow == null
+                || workflow.getId() == null
+                || Boolean.TRUE.equals(workflow.getDeleted())) {
+            throw new BusinessException(ResponseEnum.WORKFLOW_NOT_EXIST);
         }
-        String publishedData = one.getPublishedData();
-        if (StringUtils.isNotBlank(publishedData)) {
-            String newPublishedData = publishedData.replaceAll(one.getAppId(), appId);
-            one.setPublishedData(newPublishedData);
+        String oldAppId = workflow.getAppId();
+        if (StringUtils.isNotBlank(oldAppId)) {
+            if (StringUtils.isNotBlank(workflow.getData())) {
+                workflow.setData(workflow.getData().replace(oldAppId, appId));
+            }
+            if (StringUtils.isNotBlank(workflow.getPublishedData())) {
+                workflow.setPublishedData(workflow.getPublishedData().replace(oldAppId, appId));
+            }
         }
-
-        one.setAppId(appId);
-
-        return ApiResult.success(this.updateById(one));
+        workflow.setAppId(appId);
+        workflow.setUpdateTime(new Date());
+        if (workflowMapper.updateById(workflow) != 1) {
+            throw new BusinessException(ResponseEnum.INTERNAL_SERVER_ERROR);
+        }
     }
 
     public Object hasQaNode(Integer botId) {
@@ -4803,10 +5004,14 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             throw new BusinessException(ResponseEnum.BOT_NOT_EXIST);
         }
         String flowId = userLangChainInfo.getFlowId();
-        Workflow workflow = this.getOne(new LambdaQueryWrapper<Workflow>().eq(Workflow::getFlowId, flowId));
+        Workflow workflow = workflowMapper.selectOne(Wrappers.lambdaQuery(Workflow.class)
+                .eq(Workflow::getFlowId, flowId)
+                .eq(Workflow::getDeleted, false)
+                .last("limit 1"));
         if (workflow == null) {
             throw new BusinessException(ResponseEnum.WORKFLOW_NOT_EXIST);
         }
+        dataPermissionCheckTool.checkWorkflowVisible(workflow, SpaceInfoUtil.getSpaceId());
         Boolean flag = checkFlowHasQaNode(workflow);
         return ApiResult.success(flag);
     }
@@ -4850,11 +5055,14 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
     public Object deleteComparisons(WorkflowComparisonReq workflowComparisonReq) {
         try {
+            requireOwnedWorkflow(workflowComparisonReq.getFlowId());
             // Call core system to delete comparison group protocol
             coreSystemService.deleteComparisons(workflowComparisonReq.getFlowId(), workflowComparisonReq.getVersion());
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception ex) {
             log.error("Failed to delete comparison group protocol, flowId={}, version={}, error={}", workflowComparisonReq.getFlowId(), workflowComparisonReq.getVersion(), ex.getMessage(), ex);
-            return new BusinessException(ResponseEnum.RESPONSE_FAILED, "Failed to delete comparison group protocol: " + ex.getMessage());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, "Failed to delete comparison group protocol: " + ex.getMessage());
         }
         return ApiResult.success();
     }
@@ -5217,20 +5425,22 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             throw new BusinessException(ResponseEnum.PROMPT_GROUP_PROMPT_CANNOT_EMPTY);
         }
 
-        final String flowIdForLog = Optional.ofNullable(workflowComparisonReqList)
-                .filter(list -> !list.isEmpty())
-                .map(list -> list.get(0).getFlowId())
-                .orElse("");
+        WorkflowComparisonSaveReq first = workflowComparisonReqList.getFirst();
+        if (first == null || StringUtils.isBlank(first.getFlowId())
+                || workflowComparisonReqList.stream()
+                        .anyMatch(item -> item == null
+                                || !StringUtils.equals(first.getFlowId(), item.getFlowId()))) {
+            throw new BusinessException(ResponseEnum.PARAM_ERROR);
+        }
+
+        final String flowIdForLog = first.getFlowId();
 
         try {
-            Workflow workflow = workflowMapper.selectOne(
-                    Wrappers.lambdaQuery(Workflow.class)
-                            .eq(Workflow::getFlowId, workflowComparisonReqList.get(0).getFlowId()));
-            dataPermissionCheckTool.checkWorkflowBelong(workflow, SpaceInfoUtil.getSpaceId());
+            requireOwnedWorkflow(flowIdForLog);
 
             workflowComparisonMapper.delete(
                     Wrappers.lambdaQuery(WorkflowComparison.class)
-                            .eq(WorkflowComparison::getFlowId, workflowComparisonReqList.get(0).getFlowId()));
+                            .eq(WorkflowComparison::getFlowId, flowIdForLog));
 
             Date now = new Date();
             for (WorkflowComparisonSaveReq data : workflowComparisonReqList) {
@@ -5245,6 +5455,8 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             }
 
             return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(now);
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception ex) {
             log.error("Failed to save comparison group protocol, flowId={}, error={}",
                     flowIdForLog, ex.getMessage(), ex);
@@ -5253,9 +5465,37 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     }
 
     public List<WorkflowComparison> listComparisons(String promptId) {
-        return workflowComparisonMapper.selectList(Wrappers.lambdaQuery(WorkflowComparison.class)
+        List<WorkflowComparison> comparisons = workflowComparisonMapper.selectList(Wrappers.lambdaQuery(WorkflowComparison.class)
                 .eq(WorkflowComparison::getPromptId, promptId));
+        if (comparisons == null || comparisons.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Set<String> flowIds = comparisons.stream()
+                .map(WorkflowComparison::getFlowId)
+                .filter(StringUtils::isNotBlank)
+                .collect(Collectors.toSet());
+        if (flowIds.size() != 1 || comparisons.stream()
+                .anyMatch(comparison -> StringUtils.isBlank(comparison.getFlowId()))) {
+            throw new BusinessException(ResponseEnum.INSUFFICIENT_PERMISSIONS);
+        }
+        requireOwnedWorkflow(flowIds.iterator().next());
+        return comparisons;
 
+    }
+
+    private Workflow requireOwnedWorkflow(String flowId) {
+        if (StringUtils.isBlank(flowId)) {
+            throw new BusinessException(ResponseEnum.PARAM_ERROR);
+        }
+        Workflow workflow = workflowMapper.selectOne(Wrappers.lambdaQuery(Workflow.class)
+                .eq(Workflow::getFlowId, flowId)
+                .eq(Workflow::getDeleted, false)
+                .last("limit 1"));
+        if (workflow == null) {
+            throw new BusinessException(ResponseEnum.WORKFLOW_NOT_EXIST);
+        }
+        assertTopLevelWorkflowExecutableByCurrentUser(workflow);
+        return workflow;
     }
 
     public void feedback(WorkflowFeedbackReq workflowFeedbackReq, HttpServletRequest request) {
@@ -5318,16 +5558,23 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
     @Transactional(rollbackFor = Exception.class)
     public Object copyFlow(String sourceFlowId, String targetFlowId) {
-        Workflow sourceFlow = this.getOne(new LambdaQueryWrapper<Workflow>().eq(Workflow::getFlowId, sourceFlowId));
-        Workflow targetFlow = this.getOne(new LambdaQueryWrapper<Workflow>().eq(Workflow::getFlowId, targetFlowId));
+        Workflow sourceFlow = workflowMapper.selectOne(Wrappers.lambdaQuery(Workflow.class)
+                .eq(Workflow::getFlowId, sourceFlowId)
+                .eq(Workflow::getDeleted, false)
+                .last("limit 1"));
+        Workflow targetFlow = workflowMapper.selectOne(Wrappers.lambdaQuery(Workflow.class)
+                .eq(Workflow::getFlowId, targetFlowId)
+                .eq(Workflow::getDeleted, false)
+                .last("limit 1"));
         if (sourceFlow != null && targetFlow != null) {
-            log.info("Start copying flow, sourceFlowId{}, targetFlowId{}, targetFlow source data {}", sourceFlowId, targetFlowId, targetFlow.getData());
+            dataPermissionCheckTool.checkWorkflowVisible(sourceFlow, SpaceInfoUtil.getSpaceId());
+            assertTopLevelWorkflowExecutableByCurrentUser(targetFlow);
+            log.info("Start copying flow, sourceFlowId={}, targetFlowId={}", sourceFlowId, targetFlowId);
             targetFlow.setData(sourceFlow.getData());
             targetFlow.setUpdateTime(new Date());
-            this.updateById(targetFlow);
-            return true;
+            return workflowMapper.updateById(targetFlow) == 1;
         } else {
-            return false;
+            throw new BusinessException(ResponseEnum.WORKFLOW_NOT_EXIST);
         }
     }
 

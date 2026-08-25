@@ -53,6 +53,7 @@
         <websdk-java-speech.version>3.0.6</websdk-java-speech.version>
         <easy-excel.version>4.0.3</easy-excel.version>
         <minio.version>8.5.10</minio.version>
+        <tika.version>3.2.3</tika.version>
         <retrofit>2.5.0</retrofit>
         <converter-jackson>2.5.0</converter-jackson>
         <flyway.version>10.21.0</flyway.version>
@@ -205,6 +206,12 @@
                 <groupId>io.minio</groupId>
                 <artifactId>minio</artifactId>
                 <version>${minio.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-core</artifactId>
+                <version>${tika.version}</version>
             </dependency>
 
             <dependency>

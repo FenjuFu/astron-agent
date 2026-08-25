@@ -1,5 +1,8 @@
 package com.iflytek.astron.console.toolkit.service.workflow;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -22,6 +25,7 @@ import com.iflytek.astron.console.toolkit.entity.biz.workflow.WorkflowDebugDto;
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.node.BizNodeData;
 import com.iflytek.astron.console.toolkit.entity.dto.WorkflowComparisonReq;
 import com.iflytek.astron.console.toolkit.entity.dto.WorkflowReq;
+import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxRuntimeRefDto;
 import com.iflytek.astron.console.toolkit.entity.core.workflow.sse.ChatResponse;
 import com.iflytek.astron.console.toolkit.entity.table.database.DbInfo;
 import com.iflytek.astron.console.toolkit.entity.table.ConfigInfo;
@@ -37,6 +41,7 @@ import com.iflytek.astron.console.toolkit.mapper.workflow.WorkflowMapper;
 import com.iflytek.astron.console.toolkit.service.extra.AppService;
 import com.iflytek.astron.console.toolkit.service.extra.CoreSystemService;
 import com.iflytek.astron.console.toolkit.service.repo.RepoService;
+import com.iflytek.astron.console.toolkit.service.skill.SkillSandboxConfigService;
 import com.iflytek.astron.console.toolkit.tool.DataPermissionCheckTool;
 import com.iflytek.astron.console.toolkit.util.OkHttpUtil;
 import okhttp3.sse.EventSourceListener;
@@ -44,6 +49,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -53,6 +59,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -85,6 +93,7 @@ class WorkflowImportDependencyGuardTest {
     private CoreSystemService coreSystemService;
     private ApiUrl apiUrl;
     private ConfigInfoMapper configInfoMapper;
+    private SkillSandboxConfigService skillSandboxConfigService;
 
     @BeforeEach
     void setUp() {
@@ -102,6 +111,7 @@ class WorkflowImportDependencyGuardTest {
         apiUrl = new ApiUrl();
         apiUrl.setWorkflow("http://core");
         configInfoMapper = mock(ConfigInfoMapper.class);
+        skillSandboxConfigService = mock(SkillSandboxConfigService.class);
         ReflectionTestUtils.setField(workflowService, "toolBoxMapper", toolBoxMapper);
         ReflectionTestUtils.setField(workflowService, "dbInfoMapper", dbInfoMapper);
         ReflectionTestUtils.setField(workflowService, "workflowMapper", workflowMapper);
@@ -115,6 +125,10 @@ class WorkflowImportDependencyGuardTest {
         ReflectionTestUtils.setField(workflowService, "coreSystemService", coreSystemService);
         ReflectionTestUtils.setField(workflowService, "apiUrl", apiUrl);
         ReflectionTestUtils.setField(workflowService, "configInfoMapper", configInfoMapper);
+        ReflectionTestUtils.setField(
+                workflowService, "workflowInternalApiKey", "internal-secret");
+        ReflectionTestUtils.setField(
+                workflowService, "skillSandboxConfigService", skillSandboxConfigService);
         ConfigInfo multiRoundTypes = new ConfigInfo();
         multiRoundTypes.setValue("");
         when(configInfoMapper.selectOne(any(Wrapper.class))).thenReturn(multiRoundTypes);
@@ -269,7 +283,7 @@ class WorkflowImportDependencyGuardTest {
             assertUnresolvedDependencyFailure(
                     () -> workflowService.nodeDebug("message::node", request));
 
-            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyString()), never());
+            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyMap(), anyString()), never());
         }
 
         verify(dataPermissionCheckTool).checkWorkflowBelong(workflow, null);
@@ -307,7 +321,7 @@ class WorkflowImportDependencyGuardTest {
                     .extracting("responseEnum")
                     .isEqualTo(ResponseEnum.INSUFFICIENT_PERMISSIONS);
 
-            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyString()), never());
+            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyMap(), anyString()), never());
         }
 
         verify(dataPermissionCheckTool).checkWorkflowBelong(workflow, null);
@@ -332,17 +346,226 @@ class WorkflowImportDependencyGuardTest {
 
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
-                    eq("http://core/workflow/v1/node/debug/"), anyString()))
+                    eq("http://core/workflow/v1/node/debug/"),
+                    eq(Map.of("X-Workflow-Internal-Key", "internal-secret")),
+                    anyString()))
                     .thenReturn("{\"code\":0,\"data\":{\"result\":\"ok\"}}");
 
             assertThat(workflowService.nodeDebug("message::node", request).code()).isZero();
 
             okHttp.verify(() -> OkHttpUtil.post(
-                    eq("http://core/workflow/v1/node/debug/"), anyString()), times(1));
+                    eq("http://core/workflow/v1/node/debug/"),
+                    eq(Map.of("X-Workflow-Internal-Key", "internal-secret")),
+                    anyString()), times(1));
         }
 
         verify(dataPermissionCheckTool).checkWorkflowBelong(workflow, null);
         verify(appService, times(1)).remoteCallAkSk("app-1");
+    }
+
+    @Test
+    void nodeDebugNeverForwardsClientSuppliedSandbox() {
+        Workflow workflow = executableWorkflow("flow-node-sandbox", emptyWorkflow());
+        when(workflowMapper.selectOne(any(Wrapper.class))).thenReturn(workflow);
+        when(appService.remoteCallAkSk("app-1"))
+                .thenReturn(new AkSk("api-key", "api-secret"));
+        WorkflowDebugDto request = new WorkflowDebugDto();
+        request.setFlowId("flow-node-sandbox");
+        JSONObject nodeParameters = new JSONObject()
+                .fluentPut("appId", "app-1")
+                .fluentPut(
+                        "sandbox",
+                        new JSONObject()
+                                .fluentPut("enabled", true)
+                                .fluentPut("workflowId", "victim-flow")
+                                .fluentPut("uid", "victim-user"));
+        BizWorkflowData submitted = workflowWithNode("message::node", nodeParameters);
+        submitted.setEdges(List.of());
+        submitted.getNodes().getFirst().getData().setInputs(List.of());
+        submitted.getNodes().getFirst().getData().setOutputs(List.of());
+        request.setData(submitted);
+        AtomicReference<String> forwardedBody = new AtomicReference<>();
+
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            okHttp.when(() -> OkHttpUtil.post(
+                    eq("http://core/workflow/v1/node/debug/"), anyMap(), anyString()))
+                    .thenAnswer(invocation -> {
+                        forwardedBody.set(invocation.getArgument(2));
+                        return "{\"code\":0,\"data\":{\"result\":\"ok\"}}";
+                    });
+
+            assertThat(workflowService.nodeDebug("message::node", request).code()).isZero();
+        }
+
+        assertThat(forwardedBody.get())
+                .doesNotContain("victim-flow")
+                .doesNotContain("victim-user")
+                .doesNotContain("\"sandbox\"");
+    }
+
+    @Test
+    void nodeDebugLogsOnlyResponseSummaryWithoutSignedArtifactUrl() {
+        Workflow workflow = executableWorkflow("flow-node-log", emptyWorkflow());
+        when(workflowMapper.selectOne(any(Wrapper.class))).thenReturn(workflow);
+        when(appService.remoteCallAkSk("app-1"))
+                .thenReturn(new AkSk("api-key", "api-secret"));
+        WorkflowDebugDto request = new WorkflowDebugDto();
+        request.setFlowId("flow-node-log");
+        BizWorkflowData submitted = workflowWithNode(
+                "message::node", new JSONObject().fluentPut("appId", "app-1"));
+        submitted.setEdges(List.of());
+        submitted.getNodes().getFirst().getData().setInputs(List.of());
+        submitted.getNodes().getFirst().getData().setOutputs(List.of());
+        request.setData(submitted);
+        String sentinel = "https://download.example/artifact?X-Amz-Signature=must-not-log";
+        String response = new JSONObject()
+                .fluentPut("code", 0)
+                .fluentPut("data", new JSONObject().fluentPut("downloadUrl", sentinel))
+                .toJSONString();
+        Logger logger = (Logger) LoggerFactory.getLogger(WorkflowService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            okHttp.when(() -> OkHttpUtil.post(
+                    eq("http://core/workflow/v1/node/debug/"), anyMap(), anyString()))
+                    .thenReturn(response);
+
+            assertThat(workflowService.nodeDebug("message::node", request).code()).isZero();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        assertThat(appender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .anySatisfy(message -> assertThat(message)
+                        .contains("node debug response")
+                        .contains("flowId = flow-node-log")
+                        .contains("nodeId = message::node")
+                        .contains("statusCode = 0"))
+                .noneSatisfy(message -> assertThat(message).contains(sentinel));
+    }
+
+    @Test
+    void runCodeAuthorizesFlowAndReplacesClientSandboxWithNonSecretScope() {
+        Workflow workflow = executableWorkflow("flow-code-sandbox", emptyWorkflow());
+        when(workflowMapper.selectOne(any(Wrapper.class))).thenReturn(workflow);
+        SkillSandboxRuntimeRefDto runtimeRef = new SkillSandboxRuntimeRefDto();
+        runtimeRef.setProvider("e2b");
+        runtimeRef.setEnabled(Boolean.TRUE);
+        runtimeRef.setUid("current-user");
+        when(skillSandboxConfigService.toRuntimeRefDto("current-user", null))
+                .thenReturn(runtimeRef);
+        JSONObject request = new JSONObject()
+                .fluentPut("flow_id", "flow-code-sandbox")
+                .fluentPut("node_id", "ifly-code::node")
+                .fluentPut(
+                        "sandbox",
+                        new JSONObject()
+                                .fluentPut("workflowId", "victim-flow")
+                                .fluentPut("uid", "victim-user")
+                                .fluentPut("apiKey", "victim-secret"));
+        AtomicReference<String> forwardedBody = new AtomicReference<>();
+
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            okHttp.when(() -> OkHttpUtil.post(
+                    eq("http://core/workflow/v1/run"),
+                    eq(Map.of("X-Workflow-Internal-Key", "internal-secret")),
+                    anyString()))
+                    .thenAnswer(invocation -> {
+                        forwardedBody.set(invocation.getArgument(2));
+                        return "{\"code\":0,\"data\":{}}";
+                    });
+
+            workflowService.runCode(request);
+        }
+
+        assertThat(forwardedBody.get())
+                .contains("flow-code-sandbox")
+                .contains("current-user")
+                .doesNotContain("victim-flow")
+                .doesNotContain("victim-user")
+                .doesNotContain("victim-secret")
+                .doesNotContain("apiKey")
+                .doesNotContain("runtimeConfigUrl")
+                .doesNotContain("artifactUploadToken");
+        verify(dataPermissionCheckTool).checkWorkflowBelong(workflow, null);
+        verify(skillSandboxConfigService).toRuntimeRefDto("current-user", null);
+    }
+
+    @Test
+    void runCodeRejectsForeignFlowBeforeCoreCall() {
+        Workflow workflow = executableWorkflow("flow-code-foreign", emptyWorkflow());
+        when(workflowMapper.selectOne(any(Wrapper.class))).thenReturn(workflow);
+        doThrow(new BusinessException(ResponseEnum.INSUFFICIENT_PERMISSIONS))
+                .when(dataPermissionCheckTool)
+                .checkWorkflowBelong(workflow, null);
+        JSONObject request = new JSONObject()
+                .fluentPut("flow_id", "flow-code-foreign")
+                .fluentPut("node_id", "ifly-code::node")
+                .fluentPut(
+                        "sandbox",
+                        new JSONObject().fluentPut("workflowId", "victim-flow"));
+
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            assertThatThrownBy(() -> workflowService.runCode(request))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting("responseEnum")
+                    .isEqualTo(ResponseEnum.INSUFFICIENT_PERMISSIONS);
+
+            okHttp.verify(() -> OkHttpUtil.post(anyString(), anyMap(), anyString()), never());
+        }
+    }
+
+    @Test
+    void runCodeLogsOnlyResponseSummaryAndParseErrorsDoNotEchoBody() {
+        Workflow workflow = executableWorkflow("flow-code-log", emptyWorkflow());
+        when(workflowMapper.selectOne(any(Wrapper.class))).thenReturn(workflow);
+        JSONObject request = new JSONObject()
+                .fluentPut("flow_id", "flow-code-log")
+                .fluentPut("node_id", "ifly-code::node");
+        String sentinel = "https://download.example/artifact?X-Amz-Signature=must-not-log";
+        String response = new JSONObject()
+                .fluentPut("code", 0)
+                .fluentPut("data", new JSONObject().fluentPut("downloadUrl", sentinel))
+                .toJSONString();
+        Logger logger = (Logger) LoggerFactory.getLogger(WorkflowService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            okHttp.when(() -> OkHttpUtil.post(
+                    eq("http://core/workflow/v1/run"), anyMap(), anyString()))
+                    .thenReturn(response);
+
+            workflowService.runCode(request);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        assertThat(appender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .anySatisfy(message -> assertThat(message)
+                        .contains("code run response")
+                        .contains("flowId = flow-code-log")
+                        .contains("nodeId = ifly-code::node")
+                        .contains("statusCode = 0"))
+                .noneSatisfy(message -> assertThat(message).contains(sentinel));
+
+        String malformedSentinel = "malformed-upstream-body-must-not-echo";
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            okHttp.when(() -> OkHttpUtil.post(
+                    eq("http://core/workflow/v1/run"), anyMap(), anyString()))
+                    .thenReturn("{" + malformedSentinel);
+
+            assertThatThrownBy(() -> workflowService.runCode(request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageNotContaining(malformedSentinel);
+        }
     }
 
     @Test

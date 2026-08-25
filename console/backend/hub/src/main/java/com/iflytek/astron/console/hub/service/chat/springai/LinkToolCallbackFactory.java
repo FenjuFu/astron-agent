@@ -11,6 +11,7 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -63,8 +64,11 @@ public class LinkToolCallbackFactory {
             try {
                 args = StringUtils.isBlank(toolInput) ? new JSONObject() : JSON.parseObject(toolInput);
             } catch (Exception e) {
-                log.warn("Failed to parse link tool input as JSON, tool: {}, input: {}",
-                        definition.getFunctionName(), toolInput);
+                log.warn(
+                        "Failed to parse link tool input as JSON, tool={}, inputBytes={}, errorType={}",
+                        definition.getFunctionName(),
+                        toolInput == null ? 0 : toolInput.getBytes(StandardCharsets.UTF_8).length,
+                        e.getClass().getSimpleName());
                 args = new JSONObject();
             }
             String content = agentToolRuntimeService.runTool(definition, args);

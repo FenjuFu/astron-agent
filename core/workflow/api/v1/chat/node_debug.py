@@ -23,6 +23,7 @@ from workflow.extensions.fastapi.middleware.auth import (
 from workflow.extensions.otlp.metric.meter import Meter
 from workflow.extensions.otlp.trace.span import Span
 from workflow.service import flow_service
+from workflow.utils.trace_sanitization import serialize_trace_payload
 
 router = APIRouter(
     tags=["code_debug"],
@@ -42,7 +43,7 @@ async def run_code(code_run_vo: CodeRunVo) -> JSONResponse:
     span = Span()
     with span.start(attributes={"flow_id": code_run_vo.flow_id}) as span_context:
         await span.add_info_events_async(
-            {"inputs": json.dumps(code_run_vo.dict(), ensure_ascii=False)}
+            {"inputs": serialize_trace_payload(code_run_vo.dict())}
         )
         var_dict = {}
 

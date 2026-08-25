@@ -32,6 +32,7 @@ from workflow.exception.errors.err_code import CodeEnum
 from workflow.extensions.otlp.log_trace.node_log import NodeLog
 from workflow.extensions.otlp.trace.span import Span
 from workflow.infra.providers.llm.iflytek_spark.schemas import StreamOutputMsg
+from workflow.utils.trace_sanitization import serialize_trace_payload
 
 
 # Temporarily unused
@@ -134,6 +135,32 @@ class Skill(BaseModel):
     @classmethod
     def normalize_optional_string_fields(cls, value: Any) -> str:
         return "" if value is None else str(value)
+
+    @field_validator("sandbox", mode="before")
+    @classmethod
+    def remove_untrusted_sandbox_credentials(cls, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        sanitized = dict(value)
+        for key in (
+            "provider",
+            "apiKey",
+            "api_key",
+            "timeoutSeconds",
+            "timeout_seconds",
+            "allowInternetAccess",
+            "allow_internet_access",
+            "runtimeConfigUrl",
+            "runtime_config_url",
+            "artifactUploadUrl",
+            "artifact_upload_url",
+            "artifactUploadToken",
+            "artifact_upload_token",
+            "runtimeCredentialToken",
+            "runtime_credential_token",
+        ):
+            sanitized.pop(key, None)
+        return sanitized
 
 
 class AgentNodePlugin(BaseModel):
@@ -282,15 +309,16 @@ class AgentNode(BaseNode):
             reasoning_instruction, answer_instruction, messages, variable_pool, span
         )
         logged_headers = redact_trusted_trace_headers(headers)
+        sanitized_req_body = serialize_trace_payload(req_body)
         await span.add_info_event_async(f"req header: {logged_headers}")
-        await span.add_info_event_async(f"req body: {req_body}")
+        await span.add_info_event_async(f"req body: {sanitized_req_body}")
 
         if event_log_node_trace:
             event_log_node_trace.append_config_data(
                 {
                     "url": f"{os.getenv('AGENT_BASE_URL')}/agent/v1/custom/chat/completions",
                     "req_headers": logged_headers,
-                    "req_body": json.dumps(req_body, ensure_ascii=False),
+                    "req_body": sanitized_req_body,
                 }
             )
 

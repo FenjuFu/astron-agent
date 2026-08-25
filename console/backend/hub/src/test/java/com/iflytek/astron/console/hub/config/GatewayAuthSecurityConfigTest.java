@@ -6,6 +6,8 @@ import com.iflytek.astron.console.hub.config.security.RestfulAccessDeniedHandler
 import com.iflytek.astron.console.hub.config.security.RestfulAuthenticationEntryPoint;
 import com.iflytek.astron.console.hub.controller.gateway.GatewayAuthController;
 import com.iflytek.astron.console.hub.service.gateway.GatewayAuthService;
+import com.iflytek.astron.console.toolkit.security.ArtifactUploadTokenProvider;
+import com.iflytek.astron.console.toolkit.security.SandboxRuntimeCredentialTokenProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -24,7 +26,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(GatewayAuthController.class)
+@WebMvcTest(
+        value = GatewayAuthController.class,
+        properties = {
+                "skill.sandbox.artifact-upload-token=0123456789abcdef0123456789abcdef",
+                "skill.sandbox.runtime-credential.token=abcdef0123456789abcdef0123456789"
+        })
 @Import({
         SecurityConfig.class,
         JwtClaimsFilter.class,
@@ -44,6 +51,12 @@ class GatewayAuthSecurityConfigTest {
 
     @MockBean
     private JwtDecoder jwtDecoder;
+
+    @MockBean
+    private ArtifactUploadTokenProvider artifactUploadTokenProvider;
+
+    @MockBean
+    private SandboxRuntimeCredentialTokenProvider sandboxRuntimeCredentialTokenProvider;
 
     @Test
     void gatewayAuthEndpointAllowsAppCredentialBearerHeaderToReachController() throws Exception {

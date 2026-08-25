@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -56,7 +57,12 @@ public class OpenPlatformService {
         cloneSynchronize.setOriginId(originId);
         cloneSynchronize.setCurrentId(currentId);
         cloneSynchronize.setSpaceId(spaceId);
-        log.info("OpenPlatformService syncWorkflowClonereqBody = {}", cloneSynchronize);
+        log.info(
+                "OpenPlatformService syncWorkflowClone, originId={}, currentId={}, flowId={}, spaceId={}",
+                originId,
+                currentId,
+                flowId,
+                spaceId);
         Integer botId = botMassService.maasCopySynchronize(cloneSynchronize);
         log.info("OpenPlatformService syncWorkflowClone response = {}", botId);
         return botId;
@@ -84,12 +90,31 @@ public class OpenPlatformService {
                 .fluentPut("inputExample", inputExample)
                 .toString();
 
-        log.info("OpenPlatformService syncWorkflowUpdate, url = {}, headers = {}, reqBody = {}", url, headers, reqBody);
+        log.info(
+                "OpenPlatformService syncWorkflowUpdate, url = {}, workflowId = {}, bodyBytes = {}",
+                url,
+                id,
+                reqBody.getBytes(StandardCharsets.UTF_8).length);
         String response = OkHttpUtil.post(url, headers, reqBody);
-        log.info("OpenPlatformService syncWorkflowUpdate response = {}", response);
-        FlagResponseEntity responseEntity = JSON.parseObject(response, FlagResponseEntity.class);
-        if (responseEntity.getCode() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, responseEntity.getDesc());
+        FlagResponseEntity responseEntity;
+        try {
+            responseEntity = JSON.parseObject(response, FlagResponseEntity.class);
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "OpenPlatformService syncWorkflowUpdate response parse failed, url = {}, workflowId = {}, bodyBytes = {}, errorType = {}",
+                    url,
+                    id,
+                    response == null ? 0 : response.getBytes(StandardCharsets.UTF_8).length,
+                    exception.getClass().getSimpleName());
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+        }
+        log.info(
+                "OpenPlatformService syncWorkflowUpdate response, url = {}, workflowId = {}, statusCode = {}",
+                url,
+                id,
+                responseEntity == null ? null : responseEntity.getCode());
+        if (responseEntity == null || responseEntity.getCode() != 0) {
+            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
         return responseEntity.getData();
     }

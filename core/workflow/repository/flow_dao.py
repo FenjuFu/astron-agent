@@ -5,13 +5,13 @@ This module provides functions to interact with the flow table in the database,
 handling flow retrieval and data transformation operations.
 """
 
-import json
 from typing import Any, Dict
 
 from sqlalchemy import text
 from sqlmodel import Session  # type: ignore
 
 from workflow.domain.models.flow import Flow
+from workflow.utils.protocol_sanitization import sanitize_protocol_document_for_use
 
 
 def get_latest_published_flow_by(
@@ -64,11 +64,8 @@ def get_latest_published_flow_by(
         # Convert database row to Flow object
         flow = Flow(**dict(row._mapping))
 
-        # Parse JSON strings to objects if needed
-        if isinstance(flow.data, str):
-            flow.data = json.loads(flow.data)
-        if isinstance(flow.release_data, str):
-            flow.release_data = json.loads(flow.release_data)
+        flow.data = sanitize_protocol_document_for_use(flow.data)
+        flow.release_data = sanitize_protocol_document_for_use(flow.release_data)
         return flow
 
     return None

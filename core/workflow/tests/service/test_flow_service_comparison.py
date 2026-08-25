@@ -18,6 +18,13 @@ def test_get_comparison_scopes_query_to_group_version_and_tag() -> None:
         group_id=101,
         version="cmp-1",
         tag=Tag.COMPARISON.value,
+        data={
+            "api_key": "valid-model-key",
+            "sandbox": {
+                "enabled": True,
+                "artifactUploadToken": "legacy-secret",
+            },
+        },
     )
     query = session.query.return_value
     query.filter_by.return_value.first.return_value = comparison
@@ -26,6 +33,10 @@ def test_get_comparison_scopes_query_to_group_version_and_tag() -> None:
         result = flow_service.get_comparison("101", "cmp-1", session, MagicMock())
 
     assert result is comparison
+    assert result.data == {
+        "api_key": "valid-model-key",
+        "sandbox": {"enabled": True},
+    }
     query.filter_by.assert_called_once_with(
         group_id=101,
         version="cmp-1",

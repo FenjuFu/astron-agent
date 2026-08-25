@@ -14,8 +14,6 @@ public class SkillSandboxConfigDto {
     private Boolean allowInternetAccess;
     private String lastTestStatus;
     private String lastTestMessage;
-    private String artifactUploadUrl;
-    private String artifactUploadToken;
     private Long spaceId;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")

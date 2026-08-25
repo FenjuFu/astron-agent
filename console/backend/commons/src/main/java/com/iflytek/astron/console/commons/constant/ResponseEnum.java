@@ -284,6 +284,10 @@ public enum ResponseEnum {
     WORKFLOW_SKILL_API_NOT_READY(8127, "workflow.skill.api.not.ready"),
     WORKFLOW_SKILL_NAME_DESC_EMPTY(8128, "workflow.skill.name.desc.empty"),
     WORKFLOW_IMPORT_DEPENDENCY_UNRESOLVED(8129, "workflow.import.dependency.unresolved"),
+    WORKFLOW_ARTIFACT_FILE_TOO_LARGE(8130, "workflow.artifact.file.too.large"),
+    WORKFLOW_ARTIFACT_FILE_TYPE_NOT_ALLOWED(8131, "workflow.artifact.file.type.not.allowed"),
+    WORKFLOW_ARTIFACT_CONTENT_TYPE_MISMATCH(8132, "workflow.artifact.content.type.mismatch"),
+    WORKFLOW_ARTIFACT_QUOTA_EXCEEDED(8133, "workflow.artifact.quota.exceeded"),
 
 
     // Plugins 8300 - 8500
