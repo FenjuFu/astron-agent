@@ -154,9 +154,12 @@ public class SkillRuntimeToolService {
     }
 
     private String decodeText(byte[] bytes, ResponseBody body) {
-        Charset charset = body.contentType() == null
-                ? StandardCharsets.UTF_8
-                : body.contentType().charset(StandardCharsets.UTF_8);
+        MediaType contentType = body.contentType();
+        if (contentType == null) {
+            return new String(bytes, StandardCharsets.UTF_8);
+        }
+        Charset configuredCharset = contentType.charset();
+        Charset charset = configuredCharset == null ? StandardCharsets.UTF_8 : configuredCharset;
         return new String(bytes, charset);
     }
 

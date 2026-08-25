@@ -24,6 +24,55 @@ public class V1_47__sanitize_workflow_protocol_secrets extends BaseJavaMigration
 
     private static final int BATCH_SIZE = 100;
     private static final int MAX_CONFLICT_RETRIES = 3;
+    private static final String UPDATE_WORKFLOW_MYSQL =
+            "UPDATE workflow SET data = ?, published_data = ?, bak = ? WHERE id = ? AND "
+                    + "BINARY data <=> BINARY ? AND BINARY published_data <=> BINARY ? AND "
+                    + "BINARY bak <=> BINARY ?";
+    private static final String UPDATE_WORKFLOW_H2 =
+            "UPDATE workflow SET data = ?, published_data = ?, bak = ? WHERE id = ? AND "
+                    + "CAST(data AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING) AND "
+                    + "CAST(published_data AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING) AND "
+                    + "CAST(bak AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING)";
+    private static final String UPDATE_WORKFLOW_VERSION_MYSQL =
+            "UPDATE workflow_version SET data = ?, sys_data = ? WHERE id = ? AND "
+                    + "BINARY data <=> BINARY ? AND BINARY sys_data <=> BINARY ?";
+    private static final String UPDATE_WORKFLOW_VERSION_H2 =
+            "UPDATE workflow_version SET data = ?, sys_data = ? WHERE id = ? AND "
+                    + "CAST(data AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING) AND "
+                    + "CAST(sys_data AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING)";
+    private static final String UPDATE_WORKFLOW_COMPARISON_MYSQL =
+            "UPDATE workflow_comparison SET data = ? WHERE id = ? AND "
+                    + "BINARY data <=> BINARY ?";
+    private static final String UPDATE_WORKFLOW_COMPARISON_H2 =
+            "UPDATE workflow_comparison SET data = ? WHERE id = ? AND "
+                    + "CAST(data AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING)";
+    private static final String UPDATE_FLOW_PROTOCOL_TEMP_MYSQL =
+            "UPDATE flow_protocol_temp SET biz_protocol = ?, sys_protocol = ? WHERE "
+                    + "BINARY flow_id <=> BINARY ? AND created_time = ? AND "
+                    + "BINARY biz_protocol <=> BINARY ? AND BINARY sys_protocol <=> BINARY ?";
+    private static final String UPDATE_FLOW_PROTOCOL_TEMP_H2 =
+            "UPDATE flow_protocol_temp SET biz_protocol = ?, sys_protocol = ? WHERE "
+                    + "CAST(flow_id AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING) AND created_time = ? AND "
+                    + "CAST(biz_protocol AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING) AND "
+                    + "CAST(sys_protocol AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING)";
+    private static final String REREAD_FLOW_PROTOCOL_TEMP_MYSQL =
+            "SELECT flow_id, created_time, biz_protocol, sys_protocol "
+                    + "FROM flow_protocol_temp WHERE BINARY flow_id <=> BINARY ? "
+                    + "AND created_time = ? FOR UPDATE";
+    private static final String REREAD_FLOW_PROTOCOL_TEMP_H2 =
+            "SELECT flow_id, created_time, biz_protocol, sys_protocol "
+                    + "FROM flow_protocol_temp WHERE "
+                    + "CAST(flow_id AS BINARY VARYING) IS NOT DISTINCT FROM "
+                    + "CAST(? AS BINARY VARYING) AND created_time = ? FOR UPDATE";
     private final MigrationTestHook testHook;
 
     private static final Set<String> WORKFLOW_COLUMNS =
@@ -190,12 +239,9 @@ public class V1_47__sanitize_workflow_protocol_secrets extends BaseJavaMigration
                 return;
             }
             beforeOptimisticUpdate(connection, "workflow", Long.toString(row.id()), attempt);
-            String sql = "UPDATE workflow SET data = ?, published_data = ?, bak = ? WHERE id = ? AND "
-                    + exactTextPredicate(connection, "data") + " AND "
-                    + exactTextPredicate(connection, "published_data") + " AND "
-                    + exactTextPredicate(connection, "bak");
             int count;
-            try (PreparedStatement update = connection.prepareStatement(sql)) {
+            try (PreparedStatement update = prepareExactTextStatement(
+                    connection, ExactTextStatement.UPDATE_WORKFLOW)) {
                 update.setString(1, columns.values().get(0));
                 update.setString(2, columns.values().get(1));
                 update.setString(3, columns.values().get(2));
@@ -228,11 +274,9 @@ public class V1_47__sanitize_workflow_protocol_secrets extends BaseJavaMigration
             }
             beforeOptimisticUpdate(
                     connection, "workflow_version", Long.toString(row.id()), attempt);
-            String sql = "UPDATE workflow_version SET data = ?, sys_data = ? WHERE id = ? AND "
-                    + exactTextPredicate(connection, "data") + " AND "
-                    + exactTextPredicate(connection, "sys_data");
             int count;
-            try (PreparedStatement update = connection.prepareStatement(sql)) {
+            try (PreparedStatement update = prepareExactTextStatement(
+                    connection, ExactTextStatement.UPDATE_WORKFLOW_VERSION)) {
                 update.setString(1, columns.values().get(0));
                 update.setString(2, columns.values().get(1));
                 update.setLong(3, row.id());
@@ -264,10 +308,9 @@ public class V1_47__sanitize_workflow_protocol_secrets extends BaseJavaMigration
             }
             beforeOptimisticUpdate(
                     connection, "workflow_comparison", Long.toString(row.id()), attempt);
-            String sql = "UPDATE workflow_comparison SET data = ? WHERE id = ? AND "
-                    + exactTextPredicate(connection, "data");
             int count;
-            try (PreparedStatement update = connection.prepareStatement(sql)) {
+            try (PreparedStatement update = prepareExactTextStatement(
+                    connection, ExactTextStatement.UPDATE_WORKFLOW_COMPARISON)) {
                 update.setString(1, columns.values().get(0));
                 update.setLong(2, row.id());
                 update.setString(3, row.data());
@@ -299,13 +342,9 @@ public class V1_47__sanitize_workflow_protocol_secrets extends BaseJavaMigration
                 return;
             }
             beforeOptimisticUpdate(connection, "flow_protocol_temp", key, attempt);
-            String sql = "UPDATE flow_protocol_temp SET biz_protocol = ?, sys_protocol = ? WHERE "
-                    + exactTextPredicate(connection, "flow_id")
-                    + " AND created_time = ? AND "
-                    + exactTextPredicate(connection, "biz_protocol") + " AND "
-                    + exactTextPredicate(connection, "sys_protocol");
             int count;
-            try (PreparedStatement update = connection.prepareStatement(sql)) {
+            try (PreparedStatement update = prepareExactTextStatement(
+                    connection, ExactTextStatement.UPDATE_FLOW_PROTOCOL_TEMP)) {
                 update.setString(1, columns.values().get(0));
                 update.setString(2, columns.values().get(1));
                 update.setString(3, row.flowId());
@@ -379,11 +418,8 @@ public class V1_47__sanitize_workflow_protocol_secrets extends BaseJavaMigration
 
     private static TempRow rereadDirtyTempRow(
             Connection connection, String flowId, Timestamp createdTime) throws SQLException {
-        String sql = "SELECT flow_id, created_time, biz_protocol, sys_protocol "
-                + "FROM flow_protocol_temp WHERE "
-                + exactTextPredicate(connection, "flow_id")
-                + " AND created_time = ? FOR UPDATE";
-        try (PreparedStatement select = connection.prepareStatement(sql)) {
+        try (PreparedStatement select = prepareExactTextStatement(
+                connection, ExactTextStatement.REREAD_FLOW_PROTOCOL_TEMP)) {
             select.setString(1, flowId);
             select.setTimestamp(2, createdTime);
             try (ResultSet resultSet = select.executeQuery()) {
@@ -410,14 +446,41 @@ public class V1_47__sanitize_workflow_protocol_secrets extends BaseJavaMigration
         }
     }
 
-    private static String exactTextPredicate(Connection connection, String column)
-            throws SQLException {
+    private static PreparedStatement prepareExactTextStatement(
+            Connection connection, ExactTextStatement statement) throws SQLException {
         String productName = connection.getMetaData().getDatabaseProductName();
         if ("H2".equalsIgnoreCase(productName)) {
-            return "CAST(" + column + " AS BINARY VARYING) IS NOT DISTINCT FROM "
-                    + "CAST(? AS BINARY VARYING)";
+            return switch (statement) {
+                case UPDATE_WORKFLOW -> connection.prepareStatement(UPDATE_WORKFLOW_H2);
+                case UPDATE_WORKFLOW_VERSION ->
+                    connection.prepareStatement(UPDATE_WORKFLOW_VERSION_H2);
+                case UPDATE_WORKFLOW_COMPARISON ->
+                    connection.prepareStatement(UPDATE_WORKFLOW_COMPARISON_H2);
+                case UPDATE_FLOW_PROTOCOL_TEMP ->
+                    connection.prepareStatement(UPDATE_FLOW_PROTOCOL_TEMP_H2);
+                case REREAD_FLOW_PROTOCOL_TEMP ->
+                    connection.prepareStatement(REREAD_FLOW_PROTOCOL_TEMP_H2);
+            };
         }
-        return "BINARY " + column + " <=> BINARY ?";
+        return switch (statement) {
+            case UPDATE_WORKFLOW -> connection.prepareStatement(UPDATE_WORKFLOW_MYSQL);
+            case UPDATE_WORKFLOW_VERSION ->
+                connection.prepareStatement(UPDATE_WORKFLOW_VERSION_MYSQL);
+            case UPDATE_WORKFLOW_COMPARISON ->
+                connection.prepareStatement(UPDATE_WORKFLOW_COMPARISON_MYSQL);
+            case UPDATE_FLOW_PROTOCOL_TEMP ->
+                connection.prepareStatement(UPDATE_FLOW_PROTOCOL_TEMP_MYSQL);
+            case REREAD_FLOW_PROTOCOL_TEMP ->
+                connection.prepareStatement(REREAD_FLOW_PROTOCOL_TEMP_MYSQL);
+        };
+    }
+
+    private enum ExactTextStatement {
+        UPDATE_WORKFLOW,
+        UPDATE_WORKFLOW_VERSION,
+        UPDATE_WORKFLOW_COMPARISON,
+        UPDATE_FLOW_PROTOCOL_TEMP,
+        REREAD_FLOW_PROTOCOL_TEMP
     }
 
     private static SQLException unexpectedUpdateCount(String table, String key, int count) {
