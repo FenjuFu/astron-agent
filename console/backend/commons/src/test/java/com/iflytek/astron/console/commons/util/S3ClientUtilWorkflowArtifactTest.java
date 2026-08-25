@@ -10,6 +10,9 @@ import static org.mockito.Mockito.when;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import com.iflytek.astron.console.commons.exception.BusinessException;
 import io.minio.CopyObjectArgs;
 import io.minio.GetPresignedObjectUrlArgs;
@@ -227,13 +230,23 @@ class S3ClientUtilWorkflowArtifactTest {
         ArgumentCaptor<SetBucketPolicyArgs> arguments =
                 ArgumentCaptor.forClass(SetBucketPolicyArgs.class);
         verify(minioClient).setBucketPolicy(arguments.capture());
-        assertThat(arguments.getValue().config())
-                .contains("NotResource")
-                .contains("arn:aws:s3:::console-oss/workflow/artifacts")
-                .contains("AstronDenyWorkflowArtifactReads")
-                .contains("aws:PrincipalType")
-                .contains("Anonymous")
-                .doesNotContain("\"Resource\":\"arn:aws:s3:::console-oss/*\"");
+        JSONObject policy = JSON.parseObject(arguments.getValue().config());
+        JSONObject publicRead = statementBySid(
+                policy.getJSONArray("Statement"),
+                "AstronPublicReadExcludingWorkflowArtifacts");
+        assertThat(publicRead.containsKey("NotResource")).isTrue();
+        assertThat(publicRead.getJSONArray("NotResource"))
+                .contains(
+                        "arn:aws:s3:::console-oss/workflow/artifacts",
+                        "arn:aws:s3:::console-oss/workflow/artifacts/*");
+        assertThat(publicRead.containsKey("Resource")).isFalse();
+
+        JSONObject artifactDeny = statementBySid(
+                policy.getJSONArray("Statement"), "AstronDenyWorkflowArtifactReads");
+        assertThat(artifactDeny.getString("Effect")).isEqualTo("Deny");
+        assertThat(artifactDeny.getJSONObject("Condition").getJSONObject("StringEquals"))
+                .containsEntry("aws:principaltype", "Anonymous")
+                .doesNotContainKey("aws:PrincipalType");
     }
 
     @Test
@@ -379,5 +392,15 @@ class S3ClientUtilWorkflowArtifactTest {
         verify(minioClient).removeObject(remove.capture());
         assertThat(remove.getValue().bucket()).isEqualTo("console-oss");
         assertThat(remove.getValue().object()).isEqualTo("workflow/artifacts/1/file.txt");
+    }
+
+    private static JSONObject statementBySid(JSONArray statements, String sid) {
+        for (Object value : statements) {
+            if (value instanceof JSONObject statement
+                    && sid.equals(statement.getString("Sid"))) {
+                return statement;
+            }
+        }
+        throw new AssertionError("Missing bucket policy statement: " + sid);
     }
 }

@@ -132,9 +132,10 @@ public class S3ClientUtil {
                 | InvalidResponseException | IOException | NoSuchAlgorithmException | ServerException
                 | XmlParserException e) {
             log.error(
-                    "Failed to check/create/configure S3 bucket '{}' (errorType={})",
+                    "Failed to check/create/configure S3 bucket '{}' (errorType={}, errorCode={})",
                     defaultBucket,
-                    exceptionType(e));
+                    exceptionType(e),
+                    safeS3ErrorCode(e));
             throw new BusinessException(ResponseEnum.INTERNAL_SERVER_ERROR);
         }
     }
@@ -213,7 +214,7 @@ public class S3ClientUtil {
                 new JSONObject().fluentPut(
                         "StringEquals",
                         new JSONObject().fluentPut(
-                                "aws:PrincipalType", "Anonymous")));
+                                "aws:principaltype", "Anonymous")));
         statement.put(
                 "Resource",
                 new JSONArray()
@@ -248,9 +249,10 @@ public class S3ClientUtil {
                 | ServerException
                 | XmlParserException exception) {
             log.error(
-                    "Failed to restore public read policy for S3 bucket '{}' (errorType={})",
+                    "Failed to restore public read policy for S3 bucket '{}' (errorType={}, errorCode={})",
                     defaultBucket,
-                    exceptionType(exception));
+                    exceptionType(exception),
+                    safeS3ErrorCode(exception));
             throw new BusinessException(ResponseEnum.INTERNAL_SERVER_ERROR);
         }
     }
@@ -337,9 +339,10 @@ public class S3ClientUtil {
                 | ServerException
                 | XmlParserException exception) {
             log.error(
-                    "Failed to initialize private S3 bucket '{}' (errorType={})",
+                    "Failed to initialize private S3 bucket '{}' (errorType={}, errorCode={})",
                     bucketName,
-                    exceptionType(exception));
+                    exceptionType(exception),
+                    safeS3ErrorCode(exception));
             throw new BusinessException(ResponseEnum.INTERNAL_SERVER_ERROR);
         }
     }
@@ -1071,5 +1074,26 @@ public class S3ClientUtil {
     private static String exceptionType(Throwable exception) {
         String simpleName = exception.getClass().getSimpleName();
         return simpleName.isEmpty() ? exception.getClass().getName() : simpleName;
+    }
+
+    private static String safeS3ErrorCode(Throwable exception) {
+        if (!(exception instanceof ErrorResponseException errorResponseException)
+                || errorResponseException.errorResponse() == null) {
+            return "unavailable";
+        }
+        String code = errorResponseException.errorResponse().code();
+        if (code == null || code.isEmpty() || code.length() > 64) {
+            return "unavailable";
+        }
+        for (int index = 0; index < code.length(); index++) {
+            char value = code.charAt(index);
+            if (!Character.isLetterOrDigit(value)
+                    && value != '.'
+                    && value != '_'
+                    && value != '-') {
+                return "unavailable";
+            }
+        }
+        return code;
     }
 }

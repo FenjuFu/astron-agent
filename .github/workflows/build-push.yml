@@ -106,6 +106,12 @@ jobs:
           mvn -f console/backend/pom.xml -pl hub
           -Dtest=SkillSandboxDeploymentConfigurationTest test
 
+      - name: Verify MinIO bucket policy compatibility
+        timeout-minutes: 10
+        run: >-
+          mvn -f console/backend/pom.xml -pl commons
+          -Dtest=S3ClientUtilMinioPolicyCompatibilityIT test
+
       - name: Verify rendered sandbox credential contract
         run: >-
           python3 docker/astronAgent/scripts/verify_security_contract.py
