@@ -169,20 +169,38 @@ public class SkillRuntimeToolService {
         } catch (URISyntaxException exception) {
             throw new IOException("Skill resource URL is not allowed");
         }
-        String candidateScheme = normalizeScheme(candidate.getScheme());
+        validateConfiguredOrigin(configuredOrigin);
+        validateCandidateOrigin(candidate, configuredOrigin);
+        validateResourcePath(candidate, configuredOrigin);
+        validateSigV4Query(candidate.getRawQuery());
+    }
+
+    private void validateConfiguredOrigin(URI configuredOrigin) throws IOException {
         String configuredScheme = normalizeScheme(configuredOrigin.getScheme());
         if (!("http".equals(configuredScheme) || "https".equals(configuredScheme))
                 || StringUtils.isBlank(configuredOrigin.getHost())
                 || configuredOrigin.getRawUserInfo() != null
                 || configuredOrigin.getRawQuery() != null
-                || configuredOrigin.getRawFragment() != null
-                || !("http".equals(candidateScheme) || "https".equals(candidateScheme))
+                || configuredOrigin.getRawFragment() != null) {
+            throw new IOException("Skill resource URL is not allowed");
+        }
+    }
+
+    private void validateCandidateOrigin(URI candidate, URI configuredOrigin) throws IOException {
+        String candidateScheme = normalizeScheme(candidate.getScheme());
+        String configuredScheme = normalizeScheme(configuredOrigin.getScheme());
+        if (!("http".equals(candidateScheme) || "https".equals(candidateScheme))
                 || !candidateScheme.equals(configuredScheme)
                 || !StringUtils.equalsIgnoreCase(candidate.getHost(), configuredOrigin.getHost())
                 || effectivePort(candidate) != effectivePort(configuredOrigin)
                 || candidate.getRawUserInfo() != null
-                || candidate.getRawFragment() != null
-                || StringUtils.isBlank(candidate.getRawPath())
+                || candidate.getRawFragment() != null) {
+            throw new IOException("Skill resource URL is not allowed");
+        }
+    }
+
+    private void validateResourcePath(URI candidate, URI configuredOrigin) throws IOException {
+        if (StringUtils.isBlank(candidate.getRawPath())
                 || candidate.getRawPath().contains("\\")
                 || hasUnsafePathSegment(candidate.getPath())) {
             throw new IOException("Skill resource URL is not allowed");
@@ -197,7 +215,6 @@ public class SkillRuntimeToolService {
                 || candidatePath.length() <= requiredPrefix.length()) {
             throw new IOException("Skill resource URL is not allowed");
         }
-        validateSigV4Query(candidate.getRawQuery());
     }
 
     private String normalizeScheme(String scheme) {

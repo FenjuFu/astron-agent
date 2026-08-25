@@ -140,7 +140,7 @@ def test_direct_sandbox_execution_requires_fresh_body_hmac(
     raw_body = b'{"skill_id":"skill-1"}'
     timestamp = now if case != "stale" else now - 301
     timestamp_value = str(timestamp)
-    signature = hmac.new(
+    signature: str | None = hmac.new(
         token.encode(),
         timestamp_value.encode() + b"\n" + raw_body,
         hashlib.sha256,

@@ -1229,6 +1229,9 @@ class TestSkillPluginFactory:
         )
 
         class FakeResponse:
+            def __init__(self) -> None:
+                self.status = status
+
             async def __aenter__(self) -> "FakeResponse":
                 return self
 
@@ -1252,9 +1255,7 @@ class TestSkillPluginFactory:
                 return None
 
             def post(self, *args: Any, **kwargs: Any) -> FakeResponse:
-                response = FakeResponse()
-                response.status = status
-                return response
+                return FakeResponse()
 
         monkeypatch.setattr(
             "agent.service.plugin.skill_sandbox.aiohttp.FormData", MagicMock
