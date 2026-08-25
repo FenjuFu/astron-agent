@@ -1525,16 +1525,14 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             }
             checkAndEditData(bizNodeData, prefix);
             fixOnRepoNode(type, bizNodeData, prefix);
-        } catch (Exception exception) {
+        } catch (RuntimeException exception) {
             if (!node.getId().startsWith(WorkflowConst.NodeType.FLOW)
                     && CommonConst.FIXED_APPID_ENV.contains(env)) {
                 buidKeyInfo(bizNodeData);
                 checkAndEditData(bizNodeData, prefix);
                 fixOnRepoNode(type, bizNodeData, prefix);
-            } else if (exception instanceof RuntimeException runtimeException) {
-                throw runtimeException;
             } else {
-                throw new BusinessException(ResponseEnum.INTERNAL_SERVER_ERROR);
+                throw exception;
             }
         }
         return node;
