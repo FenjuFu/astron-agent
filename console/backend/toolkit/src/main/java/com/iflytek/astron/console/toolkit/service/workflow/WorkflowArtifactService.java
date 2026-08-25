@@ -88,7 +88,20 @@ public class WorkflowArtifactService
             fixedDelayString = "${skill.sandbox.artifact-legacy-reconcile-interval-ms:300000}",
             initialDelayString = "${skill.sandbox.artifact-legacy-reconcile-initial-delay-ms:300000}")
     public synchronized void migrateLegacyArtifactStorage() {
-        String sourceBucket = s3ClientUtil.getDefaultBucket();
+        LegacyReferenceMigrationResult migration = migrateLegacyArtifactReferences();
+        LegacyPublicCleanupResult cleanup = cleanupLegacyPublicArtifacts();
+        int failed = migration.failed() + cleanup.failed();
+        if (migration.migrated() > 0 || failed > 0 || cleanup.cleaned() > 0 || cleanup.retained() > 0) {
+            log.info(
+                    "Legacy workflow artifact storage reconciliation finished, migrated={}, cleaned={}, retained={}, failed={}",
+                    migration.migrated(),
+                    cleanup.cleaned(),
+                    cleanup.retained(),
+                    failed);
+        }
+    }
+
+    private LegacyReferenceMigrationResult migrateLegacyArtifactReferences() {
         String targetBucket = artifactProperties.getArtifactBucket();
         Long lastId = null;
         int migrated = 0;
@@ -155,8 +168,14 @@ public class WorkflowArtifactService
                 migrated++;
             }
         }
+        return new LegacyReferenceMigrationResult(migrated, failed);
+    }
+
+    private LegacyPublicCleanupResult cleanupLegacyPublicArtifacts() {
+        String sourceBucket = s3ClientUtil.getDefaultBucket();
         int cleaned = 0;
         int retained = 0;
+        int failed = 0;
         try {
             List<String> publicObjectKeys =
                     s3ClientUtil.listObjectKeys(
@@ -211,15 +230,12 @@ public class WorkflowArtifactService
                     "Unable to reconcile the legacy public workflow artifact prefix; its anonymous access remains blocked",
                     exception);
         }
-        if (migrated > 0 || failed > 0 || cleaned > 0 || retained > 0) {
-            log.info(
-                    "Legacy workflow artifact storage reconciliation finished, migrated={}, cleaned={}, retained={}, failed={}",
-                    migrated,
-                    cleaned,
-                    retained,
-                    failed);
-        }
+        return new LegacyPublicCleanupResult(cleaned, retained, failed);
     }
+
+    private record LegacyReferenceMigrationResult(int migrated, int failed) {}
+
+    private record LegacyPublicCleanupResult(int cleaned, int retained, int failed) {}
 
     public List<WorkflowArtifactDto> listArtifacts(Long workflowId) {
         assertWorkflowVisible(workflowId);

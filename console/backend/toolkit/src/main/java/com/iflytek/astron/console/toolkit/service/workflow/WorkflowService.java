@@ -1471,6 +1471,12 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
      * @return Debug result
      */
     public ApiResult<Object> nodeDebug(String nodeId, WorkflowDebugDto debugDto) {
+        BizWorkflowNode node = prepareNodeDebug(debugDto);
+        injectScriptSandboxIntoCodeNodes(List.of(node), debugDto.getFlowId());
+        return executeNodeDebug(nodeId, debugDto);
+    }
+
+    private BizWorkflowNode prepareNodeDebug(WorkflowDebugDto debugDto) {
         // The submitted payload contains only the node being debugged and is fully client
         // controlled. Authorize the workflow and validate the complete persisted draft first so
         // callers cannot omit an unresolved imported node or strip its marker to reach core.
@@ -1531,8 +1537,11 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
                 throw new BusinessException(ResponseEnum.INTERNAL_SERVER_ERROR);
             }
         }
-        injectScriptSandboxIntoCodeNodes(List.of(node), debugDto.getFlowId());
+        return node;
+    }
 
+    private ApiResult<Object> executeNodeDebug(String nodeId, WorkflowDebugDto debugDto) {
+        BizWorkflowData bizWorkflowData = debugDto.getData();
         // Build core protocol
         FlowProtocol protocol = new FlowProtocol();
         org.springframework.beans.BeanUtils.copyProperties(debugDto, protocol);

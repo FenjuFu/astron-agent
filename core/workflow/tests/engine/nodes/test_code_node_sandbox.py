@@ -1210,6 +1210,9 @@ async def test_code_artifact_uploader_rejects_untrusted_response_shape(
     reflected_payload = json.loads(json.dumps(payload).replace("SENSITIVE", sentinel))
 
     class FakeResponse:
+        def __init__(self) -> None:
+            self.status = status
+
         async def __aenter__(self) -> "FakeResponse":
             return self
 
@@ -1233,9 +1236,7 @@ async def test_code_artifact_uploader_rejects_untrusted_response_shape(
             return None
 
         def post(self, *args: Any, **kwargs: Any) -> FakeResponse:
-            response = FakeResponse()
-            response.status = status
-            return response
+            return FakeResponse()
 
     monkeypatch.setattr(
         "workflow.engine.nodes.code.executor.e2b.e2b_executor.aiohttp.FormData",

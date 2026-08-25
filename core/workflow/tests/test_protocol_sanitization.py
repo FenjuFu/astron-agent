@@ -1,6 +1,7 @@
 """Tests for workflow protocol persistence and runtime sanitization."""
 
 import json
+from typing import Any
 
 from workflow.utils.protocol_sanitization import (
     sanitize_protocol,
@@ -9,7 +10,7 @@ from workflow.utils.protocol_sanitization import (
 
 
 def test_sanitizer_rebuilds_nested_sandboxes_and_removes_legacy_fields() -> None:
-    protocol = {
+    protocol: dict[str, Any] = {
         "apiKey": "valid-model-key",
         "api_key": "valid-provider-key",
         "artifact_upload_token": "global-legacy-token",

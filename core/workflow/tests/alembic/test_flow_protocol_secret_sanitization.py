@@ -66,7 +66,7 @@ def test_upgrade_updates_only_changed_valid_json_without_leaking_values(
     )
     unchanged = '{ "apiKey": "valid-model-key", "data": {"nodes": []} }'
     invalid = '{"sandbox":'
-    update_statements: list[tuple[str, object]] = []
+    update_statements: list[tuple[str, tuple[object, ...]]] = []
 
     @sa.event.listens_for(engine, "before_cursor_execute")
     def capture_updates(
@@ -78,6 +78,7 @@ def test_upgrade_updates_only_changed_valid_json_without_leaking_values(
         _executemany: bool,
     ) -> None:
         if statement.lstrip().upper().startswith("UPDATE"):
+            assert isinstance(parameters, tuple)
             update_statements.append((statement, parameters))
 
     with engine.begin() as connection:

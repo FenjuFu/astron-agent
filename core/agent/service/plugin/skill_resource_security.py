@@ -52,74 +52,95 @@ def _decoded_path(raw_path: str) -> str:
     return path
 
 
+def _validate_resource_inputs(
+    candidate_value: str, origin_value: str, bucket: str
+) -> None:
+    if (
+        not candidate_value
+        or len(candidate_value) > 8192
+        or any(character in candidate_value for character in ("\r", "\n", "\t"))
+        or not origin_value
+        or len(origin_value) > 2048
+        or any(character in origin_value for character in ("\r", "\n", "\t"))
+        or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket)
+    ):
+        raise ValueError
+
+
+def _validate_resource_origin(candidate: Any, origin: Any) -> None:
+    if (
+        origin.scheme.lower() not in {"http", "https"}
+        or not origin.hostname
+        or origin.username is not None
+        or origin.password is not None
+        or bool(origin.query)
+        or bool(origin.fragment)
+        or candidate.scheme.lower() != origin.scheme.lower()
+        or not candidate.hostname
+        or candidate.hostname.lower() != origin.hostname.lower()
+        or _effective_port(candidate) != _effective_port(origin)
+        or candidate.username is not None
+        or candidate.password is not None
+        or bool(candidate.fragment)
+    ):
+        raise ValueError
+
+
+def _validate_resource_path(candidate: Any, origin: Any, bucket: str) -> None:
+    origin_path = _decoded_path(origin.path or "/").rstrip("/")
+    candidate_path = _decoded_path(candidate.path)
+    if _INVALID_PERCENT_ESCAPE.search(candidate.query):
+        raise ValueError
+    required_prefix = f"{origin_path}/{bucket}/{SKILL_OBJECT_PREFIX}"
+    if not candidate_path.startswith(required_prefix) or len(candidate_path) <= len(
+        required_prefix
+    ):
+        raise ValueError
+
+
+def _parse_sigv4_parameters(query: str) -> dict[str, str]:
+    pairs = parse_qsl(
+        query,
+        keep_blank_values=True,
+        strict_parsing=True,
+        encoding="utf-8",
+        errors="strict",
+    )
+    parameters: dict[str, str] = {}
+    for raw_key, value in pairs:
+        key = raw_key.lower()
+        if not key or not value or key in parameters:
+            raise ValueError
+        parameters[key] = value
+    return parameters
+
+
+def _validate_sigv4_parameters(parameters: dict[str, str]) -> None:
+    if not _SIGV4_REQUIRED_PARAMETERS.issubset(parameters):
+        raise ValueError
+    if (
+        parameters["x-amz-algorithm"] != "AWS4-HMAC-SHA256"
+        or re.fullmatch(r"\d{8}T\d{6}Z", parameters["x-amz-date"]) is None
+        or re.fullmatch(r"[0-9a-fA-F]{64}", parameters["x-amz-signature"]) is None
+    ):
+        raise ValueError
+    expiry = int(parameters["x-amz-expires"])
+    if not 1 <= expiry <= 604800:
+        raise ValueError
+
+
 def validate_skill_resource_url(url: str) -> str:
     """Require the configured origin, console bucket, Skill prefix, and SigV4 shape."""
     candidate_value = str(url or "").strip()
     origin_value = (os.getenv(SKILL_RESOURCE_TRUSTED_ORIGIN_ENV) or "").strip()
     bucket = (os.getenv(SKILL_RESOURCE_TRUSTED_BUCKET_ENV) or "").strip()
     try:
-        if (
-            not candidate_value
-            or len(candidate_value) > 8192
-            or any(character in candidate_value for character in ("\r", "\n", "\t"))
-            or not origin_value
-            or len(origin_value) > 2048
-            or any(character in origin_value for character in ("\r", "\n", "\t"))
-            or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket)
-        ):
-            raise ValueError
+        _validate_resource_inputs(candidate_value, origin_value, bucket)
         candidate = urlsplit(candidate_value)
         origin = urlsplit(origin_value)
-        if (
-            origin.scheme.lower() not in {"http", "https"}
-            or not origin.hostname
-            or origin.username is not None
-            or origin.password is not None
-            or bool(origin.query)
-            or bool(origin.fragment)
-            or candidate.scheme.lower() != origin.scheme.lower()
-            or not candidate.hostname
-            or candidate.hostname.lower() != origin.hostname.lower()
-            or _effective_port(candidate) != _effective_port(origin)
-            or candidate.username is not None
-            or candidate.password is not None
-            or bool(candidate.fragment)
-        ):
-            raise ValueError
-        origin_path = _decoded_path(origin.path or "/").rstrip("/")
-        candidate_path = _decoded_path(candidate.path)
-        if _INVALID_PERCENT_ESCAPE.search(candidate.query):
-            raise ValueError
-        required_prefix = f"{origin_path}/{bucket}/{SKILL_OBJECT_PREFIX}"
-        if not candidate_path.startswith(required_prefix) or len(candidate_path) <= len(
-            required_prefix
-        ):
-            raise ValueError
-
-        pairs = parse_qsl(
-            candidate.query,
-            keep_blank_values=True,
-            strict_parsing=True,
-            encoding="utf-8",
-            errors="strict",
-        )
-        parameters: dict[str, str] = {}
-        for raw_key, value in pairs:
-            key = raw_key.lower()
-            if not key or not value or key in parameters:
-                raise ValueError
-            parameters[key] = value
-        if not _SIGV4_REQUIRED_PARAMETERS.issubset(parameters):
-            raise ValueError
-        if (
-            parameters["x-amz-algorithm"] != "AWS4-HMAC-SHA256"
-            or re.fullmatch(r"\d{8}T\d{6}Z", parameters["x-amz-date"]) is None
-            or re.fullmatch(r"[0-9a-fA-F]{64}", parameters["x-amz-signature"]) is None
-        ):
-            raise ValueError
-        expiry = int(parameters["x-amz-expires"])
-        if not 1 <= expiry <= 604800:
-            raise ValueError
+        _validate_resource_origin(candidate, origin)
+        _validate_resource_path(candidate, origin, bucket)
+        _validate_sigv4_parameters(_parse_sigv4_parameters(candidate.query))
     except (TypeError, ValueError):
         raise RuntimeError(SKILL_RESOURCE_ERROR) from None
     return candidate_value
