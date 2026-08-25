@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
+from common.otlp import sid as sid_module
+from common.otlp.trace.span import Span
+
 from agent.domain.models.base import AnthropicLLMModel, BaseLLMModel, GoogleLLMModel
 from agent.engine.nodes.chat.chat_runner import ChatRunner
 from agent.engine.nodes.cot.cot_runner import CotRunner
@@ -22,8 +25,6 @@ from agent.service.plugin.skill_resource_security import (
     SKILL_RESOURCE_TRUSTED_BUCKET_ENV,
     SKILL_RESOURCE_TRUSTED_ORIGIN_ENV,
 )
-from common.otlp import sid as sid_module
-from common.otlp.trace.span import Span
 
 _SIGV4_QUERY = (
     "X-Amz-Algorithm=AWS4-HMAC-SHA256&"
