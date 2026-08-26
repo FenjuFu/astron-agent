@@ -10,7 +10,7 @@ services:
     environment:
       POSTGRES_DB: sparkdb_manager
       POSTGRES_USER: ${POSTGRES_USER:-spark}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-spark123}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a strong, unique value}"
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -29,7 +29,7 @@ services:
     image: mysql:8.4.6
     container_name: astron-agent-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD to a strong, unique value}"
       MYSQL_DATABASE: ${CONSOLE_MYSQL_DB:-astron_console}
     volumes:
       - mysql_data:/var/lib/mysql
@@ -232,7 +232,7 @@ services:
       SERVICE_LOCATION: "${SERVICE_LOCATION:-hf}"
       DATABASE_DB_TYPE: "${DATABASE_DB_TYPE:-mysql}"
       DATABASE_USERNAME: "${DATABASE_USERNAME:-root}"
-      DATABASE_PASSWORD: "${DATABASE_PASSWORD:-root123}"
+      DATABASE_PASSWORD: "${DATABASE_PASSWORD:?Set DATABASE_PASSWORD to a strong, unique value}"
       DATABASE_URL: "${DATABASE_URL:-(localhost:3306)/tenant}"
       DATABASE_MAX_OPEN_CONNS: "${DATABASE_MAX_OPEN_CONNS:-5}"
       DATABASE_MAX_IDLE_CONNS: "${DATABASE_MAX_IDLE_CONNS:-5}"
@@ -265,12 +265,12 @@ services:
       PGSQL_HOST: "${POSTGRES_HOST:-postgres}"
       PGSQL_PORT: "${POSTGRES_PORT:-5432}"
       PGSQL_USER: "${POSTGRES_USER:-spark}"
-      PGSQL_PASSWORD: "${POSTGRES_PASSWORD:-spark123}"
+      PGSQL_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a strong, unique value}"
       PGSQL_DATABASE: "${DATABASE_POSTGRES_DATABASE:-sparkdb_manager}"
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
       MYSQL_USER: "${MYSQL_USER:-root}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-root123}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD to a strong, unique value}"
       MYSQL_DATABASE: "${DATABASE_MYSQL_DATABASE:-sparkdb_manager}"
       OTLP_ENDPOINT: "${OTLP_ENDPOINT:-127.0.0.1:4317}"
       OTLP_ENABLE: "${OTLP_ENABLE:-0}"
@@ -330,7 +330,7 @@ services:
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
       MYSQL_USER: "${MYSQL_USER:-root}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-root123}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD to a strong, unique value}"
       MYSQL_DB: "${LINK_MYSQL_DB:-spark-link}"
       REDIS_IS_CLUSTER: "${REDIS_IS_CLUSTER:-false}"
       REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
@@ -379,7 +379,7 @@ services:
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
       MYSQL_USER: "${MYSQL_USER:-root}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-root123}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD to a strong, unique value}"
       CONSOLE_MYSQL_DB: "${CONSOLE_MYSQL_DB:-astron_console}"
       MYSQL_URL: "${MYSQL_URL:-jdbc:mysql://mysql:3306/astron_console?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8&createDatabaseIfNotExist=true}"
     depends_on:
@@ -417,7 +417,7 @@ services:
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
       MYSQL_USER: "${MYSQL_USER:-root}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-root123}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD to a strong, unique value}"
       MYSQL_DB: "${AGENT_MYSQL_DB:-agent}"
       OTLP_ENDPOINT: "${OTLP_ENDPOINT:-127.0.0.1:4317}"
       LANGFUSE_ENABLED: "${LANGFUSE_ENABLED:-false}"
@@ -504,7 +504,7 @@ services:
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
       MYSQL_USER: "${MYSQL_USER:-root}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-root123}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD to a strong, unique value}"
       CONSOLE_MYSQL_DB: "${CONSOLE_MYSQL_DB:-astron_console}"
       MYSQL_URL: "${MYSQL_URL:-jdbc:mysql://mysql:3306/astron_console?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8&createDatabaseIfNotExist=true}"
     depends_on:
@@ -539,7 +539,7 @@ services:
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
       MYSQL_USER: "${MYSQL_USER:-root}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-root123}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD to a strong, unique value}"
       MYSQL_DB: "${WORKFLOW_MYSQL_DB:-workflow}"
       CONSOLE_MYSQL_DB: "${CONSOLE_MYSQL_DB:-astron_console}"
       REDIS_CLUSTER_ADDR: "${REDIS_CLUSTER_ADDR}"
@@ -676,7 +676,7 @@ services:
       CONSOLE_DOMAIN: "${CONSOLE_DOMAIN:-https://your.deployment.domain}"
       MYSQL_URL: "${MYSQL_URL:-jdbc:mysql://mysql:3306/astron_console?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8&createDatabaseIfNotExist=true}"
       MYSQL_USER: "${MYSQL_USER:-root}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-root123}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD to a strong, unique value}"
       REDIS_HOST: "${REDIS_HOST:-redis}"
       REDIS_PORT: "${REDIS_PORT:-6379}"
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
