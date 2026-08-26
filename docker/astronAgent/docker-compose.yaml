@@ -51,7 +51,7 @@ services:
     networks:
       - astron-agent-network
     restart: always
-    command: redis-server ${REDIS_PASSWORD:+--requirepass} ${REDIS_PASSWORD}
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD to a strong, unique value}
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a \"$REDIS_PASSWORD\"} ping | grep PONG"]
       interval: ${HEALTH_CHECK_INTERVAL:-30s}
@@ -276,7 +276,7 @@ services:
       OTLP_ENABLE: "${OTLP_ENABLE:-0}"
       REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
       REDIS_CLUSTER_ADDR: "${REDIS_CLUSTER_ADDR}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD to a strong, unique value}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -335,7 +335,7 @@ services:
       REDIS_IS_CLUSTER: "${REDIS_IS_CLUSTER:-false}"
       REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
       REDIS_CLUSTER_ADDR: "${REDIS_CLUSTER_ADDR}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD to a strong, unique value}"
       OTLP_ENDPOINT: "${OTLP_ENDPOINT:-127.0.0.1:4317}"
       OTLP_ENABLE: "${OTLP_ENABLE:-0}"
       KAFKA_ENABLE: "${KAFKA_ENABLE:-0}"
@@ -373,7 +373,7 @@ services:
       KAFKA_SERVERS: "${KAFKA_SERVERS:-kafka:29092}"
       REDIS_CLUSTER_ADDR: "${REDIS_CLUSTER_ADDR}"
       REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD to a strong, unique value}"
       REDIS_DATABASE: "${REDIS_DATABASE:-0}"
       REDIS_DATABASE_CONSOLE: "${REDIS_DATABASE_CONSOLE:-0}"
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
@@ -412,7 +412,7 @@ services:
       SERVICE_WS_PING_TIMEOUT: "${SERVICE_WS_PING_TIMEOUT:-false}"
       REDIS_CLUSTER_ADDR: "${REDIS_CLUSTER_ADDR}"
       REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD to a strong, unique value}"
       REDIS_EXPIRE: "${REDIS_EXPIRE:-3600}"
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
@@ -499,7 +499,7 @@ services:
       OTLP_ENABLE: "${OTLP_ENABLE:-0}"
       REDIS_CLUSTER_ADDR: "${REDIS_CLUSTER_ADDR}"
       REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD to a strong, unique value}"
       REDIS_DATABASE_CONSOLE: "${REDIS_DATABASE_CONSOLE:-0}"
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
@@ -544,7 +544,7 @@ services:
       CONSOLE_MYSQL_DB: "${CONSOLE_MYSQL_DB:-astron_console}"
       REDIS_CLUSTER_ADDR: "${REDIS_CLUSTER_ADDR}"
       REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD to a strong, unique value}"
       REDIS_DATABASE_CONSOLE: "${REDIS_DATABASE_CONSOLE:-0}"
       REDIS_EXPIRE: "${REDIS_EXPIRE:-3600}"
       OTLP_ENDPOINT: "${OTLP_ENDPOINT:-127.0.0.1:4317}"
@@ -679,7 +679,7 @@ services:
       MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD to a strong, unique value}"
       REDIS_HOST: "${REDIS_HOST:-redis}"
       REDIS_PORT: "${REDIS_PORT:-6379}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD to a strong, unique value}"
       REDIS_DATABASE_CONSOLE: "${REDIS_DATABASE_CONSOLE:-0}"
       OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:${EXPOSE_MINIO_PORT:-18998}}"
       OSS_REMOTE_ENDPOINT: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT explicitly}"
