@@ -4,14 +4,17 @@ import com.iflytek.astron.console.commons.exception.BusinessException;
 import com.iflytek.astron.console.toolkit.entity.table.ConfigInfo;
 import com.iflytek.astron.console.toolkit.mapper.ConfigInfoMapper;
 import com.sun.net.httpserver.HttpServer;
+import okhttp3.Dns;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -152,6 +155,33 @@ class UrlCheckToolTest {
         URL safeUrl = (URL) method.invoke(tool, "https://example.com/a%20b?q=a%20b");
 
         assertEquals("https://example.com/a%20b?q=a%20b", safeUrl.toString());
+    }
+
+    @Test
+    void pinnedDnsReusesValidatedAddressesInsteadOfResolvingAgain() throws Exception {
+        InetAddress publicAddress = InetAddress.getByAddress(
+                "rebind.example", new byte[] {93, (byte) 184, (byte) 216, 34});
+        InetAddress privateAddress = InetAddress.getByAddress(
+                "rebind.example", new byte[] {(byte) 192, (byte) 168, 1, 10});
+        AtomicInteger lookups = new AtomicInteger();
+        Dns rebindingResolver = hostname -> lookups.getAndIncrement() == 0
+                ? List.of(publicAddress)
+                : List.of(privateAddress);
+        Dns pinnedDns = UrlCheckTool.createPinnedDns(rebindingResolver, List.of());
+
+        assertEquals(List.of(publicAddress), pinnedDns.lookup("rebind.example"));
+        assertEquals(List.of(publicAddress), pinnedDns.lookup("rebind.example"));
+        assertEquals(1, lookups.get());
+    }
+
+    @Test
+    void pinnedDnsDoesNotApplyIpWhitelistToHostname() throws Exception {
+        InetAddress privateAddress = InetAddress.getByAddress(
+                "rebind.example", new byte[] {(byte) 192, (byte) 168, 1, 10});
+        Dns resolver = hostname -> List.of(privateAddress);
+        Dns pinnedDns = UrlCheckTool.createPinnedDns(resolver, List.of("192.168.1.10"));
+
+        assertThrows(BusinessException.class, () -> pinnedDns.lookup("rebind.example"));
     }
 
     private static ConfigInfoMapper mockConfigMapper(String ipBlackList, String segmentBlackList) {

@@ -7,6 +7,10 @@ import com.iflytek.astron.console.toolkit.mapper.ConfigInfoMapper;
 import com.iflytek.astron.console.toolkit.util.ssrf.SsrfValidators;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.Dns;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
@@ -15,6 +19,7 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -67,6 +72,16 @@ public class UrlCheckTool {
             "bit.ly", "tinyurl.com", "t.co", "rebrandly.com", "is.gd", "t.ly",
             "monojson.com", "t.cn", "url.cn", "dwz.cn");
 
+    // Shared base client for redirect probing. Redirects are inspected one hop at a time, and direct
+    // connections ensure that the per-call pinned DNS controls the actual destination address.
+    private static final OkHttpClient REDIRECT_PROBE_CLIENT = new OkHttpClient.Builder()
+            .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .proxy(Proxy.NO_PROXY)
+            .build();
+
     /**
      * Gets the direct redirected URL without following it automatically.
      *
@@ -100,25 +115,20 @@ public class UrlCheckTool {
     }
 
     private RedirectLookupResult lookupRedirect(String url, List<String> ipWhiteList) throws IOException {
-        HttpURLConnection conn = null;
-        try {
-            URL u = toSafeHttpUrl(url);
-            ensurePublicAddresses(u.getHost(), ipWhiteList);
-            URLConnection urlConnection = u.openConnection();
-            if (!(urlConnection instanceof HttpURLConnection httpURLConnection)) {
-                throw new BusinessException(ResponseEnum.TOOLBOX_URL_HTTP_HTTPS_ONLY);
-            }
-            conn = httpURLConnection;
-            conn.setInstanceFollowRedirects(false);
-            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            conn.setReadTimeout(READ_TIMEOUT_MS);
-            conn.setRequestMethod("HEAD");
-            int code = conn.getResponseCode();
-            return new RedirectLookupResult(code, conn.getHeaderField("Location"));
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
+        URL u = toSafeHttpUrl(url);
+        // Pin DNS resolution to the validated public addresses so the address vetted here is exactly
+        // the one connected to. Resolving inside the client (instead of a separate pre-flight check
+        // followed by an independent resolution at connect time) removes the DNS-rebinding / TOCTOU
+        // window where a hostname could resolve to a public IP during validation and to an internal
+        // IP during the actual request.
+        Dns pinnedDns = createPinnedDns(Dns.SYSTEM, ipWhiteList);
+        OkHttpClient client = REDIRECT_PROBE_CLIENT.newBuilder().dns(pinnedDns).build();
+        Request request = new Request.Builder()
+                .url(u)
+                .head()
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            return new RedirectLookupResult(response.code(), response.header("Location"));
         }
     }
 
@@ -487,27 +497,6 @@ public class UrlCheckTool {
 
     private record RedirectLookupResult(int statusCode, String location) {}
 
-    private boolean isHostInDomainAllowList(String host, List<String> domainWhiteList) {
-        if (StringUtils.isBlank(host) || domainWhiteList == null || domainWhiteList.isEmpty()) {
-            return false;
-        }
-        String normalizedHost = StringUtils.lowerCase(StringUtils.trim(host), Locale.ROOT);
-        for (String allowed : domainWhiteList) {
-            String normalizedAllowed = StringUtils.lowerCase(StringUtils.trimToEmpty(allowed), Locale.ROOT);
-            // Remove leading dot if present (e.g., ".example.com" -> "example.com")
-            if (normalizedAllowed.startsWith(".")) {
-                normalizedAllowed = normalizedAllowed.substring(1);
-            }
-            if (normalizedAllowed.isEmpty()) {
-                continue;
-            }
-            if (normalizedHost.equals(normalizedAllowed) || normalizedHost.endsWith("." + normalizedAllowed)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private URL toSafeHttpUrl(String url) throws IOException {
         try {
             URI uri = new URI(url);
@@ -537,13 +526,56 @@ public class UrlCheckTool {
         }
     }
 
-    private void ensurePublicAddresses(String host, List<String> ipWhiteList) throws UnknownHostException {
+    /**
+     * Creates a DNS implementation that pins the first validated resolution for each hostname. The
+     * caller therefore connects to exactly the addresses accepted by the IP policy, including if the
+     * HTTP client retries the lookup.
+     *
+     * <p>
+     * A restricted (loopback/private/link-local/etc.) address is rejected unless the host is an IP
+     * literal explicitly allowed by the IP whitelist, mirroring {@code validateUrlAgainstBlacklist}. An
+     * IP whitelist entry can only exempt an IP-literal URL, so a hostname cannot switch to an internal
+     * address between validation and connection.
+     * </p>
+     *
+     * @param resolver DNS resolver used for the initial lookup
+     * @param ipWhiteList allowed exact IPs or CIDR ranges for IP-literal hosts
+     * @return DNS implementation that returns only pinned, validated addresses
+     */
+    static Dns createPinnedDns(Dns resolver, List<String> ipWhiteList) {
+        return new Dns() {
+            private final Map<String, List<InetAddress>> pinnedAddresses = new HashMap<>();
+
+            @Override
+            public synchronized List<InetAddress> lookup(String hostname) throws UnknownHostException {
+                List<InetAddress> addresses = pinnedAddresses.get(hostname);
+                if (addresses == null) {
+                    addresses = List.copyOf(resolvePublicAddresses(resolver, hostname, ipWhiteList));
+                    pinnedAddresses.put(hostname, addresses);
+                }
+                return addresses;
+            }
+        };
+    }
+
+    private static List<InetAddress> resolvePublicAddresses(
+            Dns resolver, String host, List<String> ipWhiteList) throws UnknownHostException {
         boolean ipLiteral = SsrfValidators.isIpLiteral(host);
-        for (InetAddress address : InetAddress.getAllByName(host)) {
-            if (!(ipLiteral && SsrfValidators.isAddressMatchedByIpRules(address, ipWhiteList))
-                    && SsrfValidators.isRestrictedAddress(address)) {
+        List<InetAddress> resolved = resolver.lookup(host);
+        List<InetAddress> allowed = new ArrayList<>(resolved.size());
+        for (InetAddress address : resolved) {
+            if (ipLiteral && SsrfValidators.isAddressMatchedByIpRules(address, ipWhiteList)) {
+                allowed.add(address);
+                continue;
+            }
+            if (SsrfValidators.isRestrictedAddress(address)) {
                 throw new BusinessException(ResponseEnum.TOOLBOX_URL_ILLEGAL);
             }
+            allowed.add(address);
         }
+        if (allowed.isEmpty()) {
+            throw new UnknownHostException(host);
+        }
+        return allowed;
     }
 }
