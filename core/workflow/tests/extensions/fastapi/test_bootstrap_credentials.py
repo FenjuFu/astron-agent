@@ -1,8 +1,12 @@
 import hashlib
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 import pytest
+from sqlalchemy import Engine
 from sqlmodel import Session, SQLModel, create_engine  # type: ignore
 
 from workflow.domain.models.ai_app import App
@@ -23,7 +27,7 @@ from workflow.extensions.fastapi.lifespan.bootstrap_credentials import (
 
 
 @pytest.fixture
-def engine():
+def engine() -> Engine:
     database_engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(
         database_engine, tables=[AppSource.__table__, App.__table__]
@@ -47,7 +51,7 @@ def credentials() -> TenantBootstrapCredentials:
     return TenantBootstrapCredentials(BOOTSTRAP_TENANT_ID, "k" * 48, "s" * 48)
 
 
-def deployment_owned_app(**overrides) -> App:
+def deployment_owned_app(**overrides: Any) -> App:
     values = {
         "id": 1,
         "name": "星辰",
@@ -64,7 +68,7 @@ def deployment_owned_app(**overrides) -> App:
     return App(**values)
 
 
-def test_synchronize_bootstrap_app_creates_reserved_row(engine) -> None:
+def test_synchronize_bootstrap_app_creates_reserved_row(engine: Engine) -> None:
     with Session(engine) as session:
         synchronize_bootstrap_app(session, credentials())
         session.commit()
@@ -76,7 +80,7 @@ def test_synchronize_bootstrap_app_creates_reserved_row(engine) -> None:
         assert app.api_secret == "s" * 48
 
 
-def test_synchronize_bootstrap_app_rotates_only_reserved_row(engine) -> None:
+def test_synchronize_bootstrap_app_rotates_only_reserved_row(engine: Engine) -> None:
     with Session(engine) as session:
         session.add(
             deployment_owned_app(
@@ -107,7 +111,7 @@ def test_synchronize_bootstrap_app_rotates_only_reserved_row(engine) -> None:
         assert user_app is not None and user_app.api_key == "user-key"
 
 
-def test_synchronize_bootstrap_app_rejects_alias_collision(engine) -> None:
+def test_synchronize_bootstrap_app_rejects_alias_collision(engine: Engine) -> None:
     with Session(engine) as session:
         session.add(
             App(
@@ -124,7 +128,7 @@ def test_synchronize_bootstrap_app_rejects_alias_collision(engine) -> None:
             synchronize_bootstrap_app(session, credentials())
 
 
-def test_synchronize_bootstrap_app_rotates_strong_custom_pair(engine) -> None:
+def test_synchronize_bootstrap_app_rotates_strong_custom_pair(engine: Engine) -> None:
     with Session(engine) as session:
         session.add(
             deployment_owned_app(
@@ -144,7 +148,7 @@ def test_synchronize_bootstrap_app_rotates_strong_custom_pair(engine) -> None:
 
 
 def test_second_rotation_revokes_old_digest_only_after_commit(
-    engine, monkeypatch: pytest.MonkeyPatch
+    engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     old_key = "x" * 48
     old_secret = "y" * 48
@@ -155,7 +159,7 @@ def test_second_rotation_revokes_old_digest_only_after_commit(
     commit_state = {"committed": False}
 
     @contextmanager
-    def committed_session():
+    def committed_session() -> Iterator[Session]:
         with Session(engine) as session:
             yield session
             session.commit()
@@ -191,7 +195,7 @@ def test_second_rotation_revokes_old_digest_only_after_commit(
     ],
 )
 def test_synchronize_bootstrap_app_rejects_tampered_reserved_identity(
-    engine, field: str, value: int
+    engine: Engine, field: str, value: int
 ) -> None:
     with Session(engine) as session:
         session.add(deployment_owned_app(**{field: value}))
@@ -201,7 +205,9 @@ def test_synchronize_bootstrap_app_rejects_tampered_reserved_identity(
             synchronize_bootstrap_app(session, credentials())
 
 
-def test_synchronize_bootstrap_app_accepts_matching_custom_pair(engine) -> None:
+def test_synchronize_bootstrap_app_accepts_matching_custom_pair(
+    engine: Engine,
+) -> None:
     configured = credentials()
     with Session(engine) as session:
         session.add(
@@ -224,7 +230,7 @@ def test_synchronize_bootstrap_app_accepts_matching_custom_pair(engine) -> None:
 
 
 def test_load_tenant_bootstrap_credentials_from_files(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     key_file = tmp_path / "tenant-key"
     secret_file = tmp_path / "tenant-secret"

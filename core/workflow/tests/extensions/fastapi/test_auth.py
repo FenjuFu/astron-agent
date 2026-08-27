@@ -814,7 +814,7 @@ class TestAuthMiddleware:
         mock_span.add_info_event_async = AsyncMock()
         valid_digest = credential_cache_key("same-key:valid-secret")
 
-        def cache_lookup(digest: str):
+        def cache_lookup(digest: str) -> str | None:
             return "cached-app" if digest == valid_digest else None
 
         response = Mock()

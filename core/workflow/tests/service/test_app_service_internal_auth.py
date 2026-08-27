@@ -2,12 +2,14 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from workflow.service.app_service import _gen_app_auth_header
 from workflow.utils.credentials import TENANT_INTERNAL_API_KEY_HEADER
 
 
 def test_gen_app_auth_header_includes_tenant_internal_key(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("APP_MANAGE_PLAT_KEY", "k" * 48)
     monkeypatch.setenv("APP_MANAGE_PLAT_SECRET", "s" * 48)
@@ -32,7 +34,7 @@ def test_gen_app_auth_header_includes_tenant_internal_key(
 
 
 def test_gen_app_auth_header_fails_closed_without_complete_credentials(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("APP_MANAGE_PLAT_KEY", "k" * 48)
     monkeypatch.delenv("APP_MANAGE_PLAT_SECRET", raising=False)

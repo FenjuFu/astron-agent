@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi import APIRouter, HTTPException
 
@@ -57,7 +59,7 @@ async def test_internal_api_auth_fails_closed_when_not_configured(
 
 @pytest.mark.asyncio
 async def test_internal_api_auth_reads_persisted_key_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     configured_key = "f" * 48
     key_file = tmp_path / "workflow-internal-api-key"
@@ -73,7 +75,7 @@ async def test_internal_api_auth_reads_persisted_key_file(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("file_state", ["missing", "short", "oversized", "symlink"])
 async def test_internal_api_auth_rejects_invalid_key_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, file_state: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, file_state: str
 ) -> None:
     key_file = tmp_path / "workflow-internal-api-key"
     if file_state == "short":

@@ -87,7 +87,7 @@ def test_redis_lock_uses_redis_3_5_compatible_arguments() -> None:
         def __init__(self) -> None:
             self.kwargs: dict[str, object] | None = None
 
-        def lock(self, **kwargs):
+        def lock(self, **kwargs: object) -> str:
             self.kwargs = kwargs
             return "lock"
 
