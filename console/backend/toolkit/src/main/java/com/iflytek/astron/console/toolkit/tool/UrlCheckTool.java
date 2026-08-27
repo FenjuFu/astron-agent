@@ -123,9 +123,9 @@ public class UrlCheckTool {
         // IP during the actual request.
         Dns pinnedDns = createPinnedDns(Dns.SYSTEM, ipWhiteList);
         OkHttpClient client = REDIRECT_PROBE_CLIENT.newBuilder().dns(pinnedDns).build();
+        // The direct client connects only to addresses returned by the validated, pinned DNS.
+        // codeql[java/ssrf]
         Request request = new Request.Builder()
-                // The direct client connects only to addresses returned by the validated, pinned DNS.
-                // codeql[java/ssrf]
                 .url(u)
                 .head()
                 .build();
