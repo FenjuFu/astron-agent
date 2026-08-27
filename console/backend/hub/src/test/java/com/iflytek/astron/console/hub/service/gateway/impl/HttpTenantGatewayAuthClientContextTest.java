@@ -10,7 +10,9 @@ class HttpTenantGatewayAuthClientContextTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withBean(HttpTenantGatewayAuthClient.class)
-            .withPropertyValues("tenant.verify-app-auth=http://core-tenant:5052/v2/app/key/verify");
+            .withPropertyValues(
+                    "tenant.verify-app-auth=http://core-tenant:5052/v2/app/key/verify",
+                    "api.url.apiSecret=0123456789abcdef0123456789abcdef");
 
     @Test
     void createsTenantGatewayAuthClientFromSpringContext() {

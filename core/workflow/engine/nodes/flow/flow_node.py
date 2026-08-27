@@ -34,6 +34,9 @@ from workflow.exception.errors.err_code import CodeEnum
 from workflow.extensions.middleware.database.utils import session_getter
 from workflow.extensions.otlp.log_trace.node_log import NodeLog
 from workflow.extensions.otlp.trace.span import Span
+from workflow.utils.credentials import credential_from_env_or_file
+
+WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER = "CHANGE_ME_WORKFLOW_INTERNAL_API_KEY"
 
 
 class FlowNode(BaseNode):
@@ -405,8 +408,21 @@ class FlowNode(BaseNode):
             # Use bearer token for production environments
             headers["Authorization"] = authorization
         else:
-            # Use consumer username for local environments
+            # Development/test calls use a trusted identity only when the same
+            # deployment-internal credential is present.
+            internal_api_key = credential_from_env_or_file(
+                "WORKFLOW_INTERNAL_API_KEY",
+                "WORKFLOW_INTERNAL_API_KEY_FILE",
+                min_length=32,
+                placeholders=(WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER,),
+            )
+            if not internal_api_key:
+                raise CustomException(
+                    err_code=CodeEnum.WORKFLOW_EXECUTION_ERROR,
+                    err_msg="Workflow internal API authentication is not configured",
+                )
             headers["X-Consumer-Username"] = self.appId
+            headers["X-Workflow-Internal-Key"] = internal_api_key
 
         return headers, req_body
 

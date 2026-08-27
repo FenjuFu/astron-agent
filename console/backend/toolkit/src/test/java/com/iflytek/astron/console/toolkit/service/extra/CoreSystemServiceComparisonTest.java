@@ -17,6 +17,8 @@ import org.mockito.MockedStatic;
 import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -24,6 +26,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mockStatic;
 
 class CoreSystemServiceComparisonTest {
+
+    private static final String INTERNAL_KEY =
+            "0123456789abcdef0123456789abcdef";
 
     private CoreSystemService coreSystemService;
 
@@ -38,6 +43,8 @@ class CoreSystemServiceComparisonTest {
         CommonConfig commonConfig = new CommonConfig();
         commonConfig.setAppId("console-app");
         ReflectionTestUtils.setField(coreSystemService, "commonConfig", commonConfig);
+        ReflectionTestUtils.setField(
+                coreSystemService, "workflowInternalApiKey", INTERNAL_KEY);
     }
 
     @Test
@@ -45,6 +52,7 @@ class CoreSystemServiceComparisonTest {
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
                     "http://core/workflow/v1/protocol/compare/get",
+                    Map.of("X-Workflow-Internal-Key", INTERNAL_KEY),
                     "{\"flow_id\":\"flow-1\",\"version\":\"cmp-1\"}"))
                     .thenReturn("{\"code\":0,\"message\":\"success\","
                             + "\"data\":{\"data\":{\"nodes\":[],\"edges\":[]}}}");
@@ -60,6 +68,7 @@ class CoreSystemServiceComparisonTest {
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
                     "http://core/workflow/v1/protocol/compare/get",
+                    Map.of("X-Workflow-Internal-Key", INTERNAL_KEY),
                     "{\"flow_id\":\"flow-1\",\"version\":\"missing\"}"))
                     .thenReturn("{\"code\":1001,\"message\":\"not found\"}");
 
@@ -80,6 +89,7 @@ class CoreSystemServiceComparisonTest {
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
                     org.mockito.ArgumentMatchers.anyString(),
+                    anyMap(),
                     org.mockito.ArgumentMatchers.anyString()))
                     .thenReturn("{\"code\":0,\"message\":\""
                             + sentinel
@@ -115,7 +125,7 @@ class CoreSystemServiceComparisonTest {
                             ? "{\"code\":0,\"message\":\"" + sentinel
                                     + "\",\"data\":{\"database_id\":7000000000}}"
                             : "{\"code\":0,\"message\":\"" + sentinel + "\",\"data\":{}}");
-            okHttp.when(() -> OkHttpUtil.delete(anyString(), anyString()))
+            okHttp.when(() -> OkHttpUtil.delete(anyString(), anyMap(), anyString()))
                     .thenReturn("{\"code\":0,\"message\":\"" + sentinel + "\",\"data\":{}}");
 
             assertThat(coreSystemService.createDatabase(sentinel, "uid", 3L, sentinel))

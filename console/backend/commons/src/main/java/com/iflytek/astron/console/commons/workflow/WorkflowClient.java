@@ -1,5 +1,6 @@
 package com.iflytek.astron.console.commons.workflow;
 
+import com.iflytek.astron.console.commons.security.WorkflowInternalApiKey;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.ConnectionPool;
 import okhttp3.OkHttpClient;
@@ -25,6 +26,8 @@ public class WorkflowClient {
 
     private String appSecret;
 
+    private String workflowInternalApiKey;
+
     private Request request;
 
     private RequestBody requestBody;
@@ -39,12 +42,20 @@ public class WorkflowClient {
             .connectionPool(new ConnectionPool(1000, 10, TimeUnit.MINUTES))
             .build();
 
-    public WorkflowClient(String chatUrl, String appId, String appKey, String appSecret, RequestBody requestBody) {
+    public WorkflowClient(
+            String chatUrl,
+            String appId,
+            String appKey,
+            String appSecret,
+            RequestBody requestBody,
+            String workflowInternalApiKey) {
         this.chatUrl = chatUrl;
         this.appId = appId;
         this.appKey = appKey;
         this.appSecret = appSecret;
         this.requestBody = requestBody;
+        this.workflowInternalApiKey =
+                WorkflowInternalApiKey.requireConfigured(workflowInternalApiKey);
     }
 
     /**
@@ -57,6 +68,7 @@ public class WorkflowClient {
         String wsURL = chatUrl;
         this.request = new Request.Builder()
                 .header("X-Consumer-Username", appId)
+                .header(WorkflowInternalApiKey.HEADER, workflowInternalApiKey)
                 .header("Authorization", genAuthorization())
                 .url(wsURL)
                 .post(requestBody)

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"tenant/config"
@@ -51,6 +52,9 @@ func (db *Database) buildMysql(conf *config.Config) error {
 	if len(conf.DataBase.Url) == 0 {
 		return errors.New("mysql url is empty")
 	}
+	if err := conf.TenantBootstrap.Validate(); err != nil {
+		return fmt.Errorf("invalid tenant bootstrap credentials: %w", err)
+	}
 
 	dsn := fmt.Sprintf("%s:%s@tcp%s", conf.DataBase.UserName, conf.DataBase.Password, conf.DataBase.Url)
 	parsedDsn, err := mysql.ParseDSN(dsn)
@@ -77,6 +81,11 @@ func (db *Database) buildMysql(conf *config.Config) error {
 		_ = client.Close()
 		return err
 	}
+	if err := reconcileTenantBootstrap(client, conf.TenantBootstrap); err != nil {
+		_ = client.Close()
+		return err
+	}
+	log.Printf("tenant bootstrap credentials reconciled")
 
 	db.mysql = client
 	return nil

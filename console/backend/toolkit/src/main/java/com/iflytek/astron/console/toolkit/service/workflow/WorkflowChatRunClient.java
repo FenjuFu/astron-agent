@@ -1,6 +1,7 @@
 package com.iflytek.astron.console.toolkit.service.workflow;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.iflytek.astron.console.commons.security.WorkflowInternalApiKey;
 import com.iflytek.astron.console.toolkit.config.properties.CommonConfig;
 import lombok.RequiredArgsConstructor;
 import okhttp3.MediaType;
@@ -35,11 +36,17 @@ public class WorkflowChatRunClient {
     @Value("${workflow.chatUrl}")
     private String chatUrl;
 
+    @Value("${workflow.internal-api-key:}")
+    private String workflowInternalApiKey;
+
     /** POST the chat request and return the raw response body (final LLMGenerate JSON frame). */
     public String chat(JSONObject requestBody) throws IOException {
         Request request = new Request.Builder()
                 .url(chatUrl)
                 .header("X-Consumer-Username", commonConfig.getAppId())
+                .header(
+                        WorkflowInternalApiKey.HEADER,
+                        WorkflowInternalApiKey.requireConfigured(workflowInternalApiKey))
                 .header("Authorization", "Bearer " + commonConfig.getApiKey() + ":" + commonConfig.getApiSecret())
                 .post(RequestBody.create(requestBody.toJSONString(), JSON_MEDIA))
                 .build();

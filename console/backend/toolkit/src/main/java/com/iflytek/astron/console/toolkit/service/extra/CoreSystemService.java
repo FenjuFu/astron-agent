@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.*;
 import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.exception.BusinessException;
 import com.iflytek.astron.console.commons.response.ApiResult;
+import com.iflytek.astron.console.commons.security.WorkflowInternalApiKey;
 import com.iflytek.astron.console.toolkit.common.constant.CommonConst;
 import com.iflytek.astron.console.toolkit.config.properties.ApiUrl;
 import com.iflytek.astron.console.toolkit.config.properties.CommonConfig;
@@ -64,6 +65,9 @@ public class CoreSystemService {
     @Value("${spring.profiles.active}")
     String env;
 
+    @Value("${workflow.internal-api-key:}")
+    String workflowInternalApiKey;
+
     @Autowired
     AppService appService;
     @Autowired
@@ -95,6 +99,7 @@ public class CoreSystemService {
             requestHeader = assembleRequestHeader(url, apiUrl.getTenantKey(), apiUrl.getTenantSecret(), "POST", body.getBytes(StandardCharsets.UTF_8));
         }
         requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
+        addWorkflowInternalApiKey(requestHeader);
         log.info(
                 "workflow protocol publish, url = {}, flowId = {}, bodyBytes = {}",
                 url,
@@ -143,6 +148,7 @@ public class CoreSystemService {
         }
         String authBody = authJson.toString();
         requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
+        addWorkflowInternalApiKey(requestHeader);
         log.info(
                 "workflow protocol auth, url = {}, flowId = {}, bodyBytes = {}",
                 authUrl,
@@ -181,6 +187,7 @@ public class CoreSystemService {
         try {
             requestHeader = assembleRequestHeader(uploadUrl, apiKey, apiSecret, "POST", convertMapToBytes(param));
             requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
+            addWorkflowInternalApiKey(requestHeader);
             requestHeader.put("Content-Type", "multipart/form-data");
             log.info(
                     "workflow protocol upload file, url = {}, fileBytes = {}",
@@ -226,6 +233,7 @@ public class CoreSystemService {
         try {
             requestHeader = assembleRequestHeader(authUrl, apiKey, apiSecret, "POST", convertMapToBytes(param));
             requestHeader.put(X_CONSUMER_USERNAME, apiUrl.getTenantId());
+            addWorkflowInternalApiKey(requestHeader);
             requestHeader.put("Content-Type", "multipart/form-data");
             log.info(
                     "workflow protocol upload files, url = {}, fileCount = {}",
@@ -375,7 +383,7 @@ public class CoreSystemService {
                 flowId,
                 version,
                 body.getBytes(StandardCharsets.UTF_8).length);
-        String response = OkHttpUtil.post(url, body);
+        String response = OkHttpUtil.post(url, workflowInternalHeaders(), body);
         ApiResult<?> result = parseApiResult(response, "workflow add comparisons", url);
         log.info(
                 "workflow add comparisons response, url = {}, flowId = {}, statusCode = {}",
@@ -401,7 +409,7 @@ public class CoreSystemService {
                 .fluentPut("flow_id", flowId)
                 .fluentPut("version", version)
                 .toString();
-        String response = OkHttpUtil.post(url, body);
+        String response = OkHttpUtil.post(url, workflowInternalHeaders(), body);
         JSONObject result = parseJsonObject(response, "workflow get comparison", url);
         log.info(
                 "workflow get comparison response, url = {}, flowId = {}, statusCode = {}",
@@ -438,7 +446,7 @@ public class CoreSystemService {
                 flowId,
                 version,
                 body.getBytes(StandardCharsets.UTF_8).length);
-        String response = OkHttpUtil.delete(url, body);
+        String response = OkHttpUtil.delete(url, workflowInternalHeaders(), body);
         ApiResult<?> result = parseApiResult(response, "workflow delete comparisons", url);
         log.info(
                 "workflow delete comparisons response, url = {}, flowId = {}, statusCode = {}",
@@ -451,6 +459,18 @@ public class CoreSystemService {
         if (result.code() != 0) {
             throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
         }
+    }
+
+    private Map<String, String> workflowInternalHeaders() {
+        Map<String, String> headers = new HashMap<>();
+        addWorkflowInternalApiKey(headers);
+        return headers;
+    }
+
+    private void addWorkflowInternalApiKey(Map<String, String> headers) {
+        headers.put(
+                WorkflowInternalApiKey.HEADER,
+                WorkflowInternalApiKey.requireConfigured(workflowInternalApiKey));
     }
 
 

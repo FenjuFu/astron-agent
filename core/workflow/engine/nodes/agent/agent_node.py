@@ -32,7 +32,21 @@ from workflow.exception.errors.err_code import CodeEnum
 from workflow.extensions.otlp.log_trace.node_log import NodeLog
 from workflow.extensions.otlp.trace.span import Span
 from workflow.infra.providers.llm.iflytek_spark.schemas import StreamOutputMsg
+from workflow.utils.credentials import credential_from_env_or_file
 from workflow.utils.trace_sanitization import serialize_trace_payload
+
+WORKFLOW_INTERNAL_API_KEY_HEADER = "X-Workflow-Internal-Key"
+WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER = "CHANGE_ME_WORKFLOW_INTERNAL_API_KEY"
+
+
+def _redact_agent_request_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Remove deployment credentials and signed trace context from telemetry."""
+    trace_safe_headers = redact_trusted_trace_headers(headers)
+    return {
+        key: value
+        for key, value in trace_safe_headers.items()
+        if key.lower() != WORKFLOW_INTERNAL_API_KEY_HEADER.lower()
+    }
 
 
 # Temporarily unused
@@ -261,6 +275,33 @@ class AgentNode(BaseNode):
     )
     source: str = Field(default=ModelProviderEnum.XINGHUO.value)
 
+    def _build_agent_request_headers(self) -> dict[str, str]:
+        """Build an authenticated request for the deployment-internal Agent API."""
+        internal_api_key = credential_from_env_or_file(
+            "WORKFLOW_INTERNAL_API_KEY",
+            "WORKFLOW_INTERNAL_API_KEY_FILE",
+            min_length=32,
+            placeholders=(WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER,),
+        )
+        if not internal_api_key:
+            raise CustomException(
+                err_code=CodeEnum.AGENT_NODE_EXECUTION_ERROR,
+                err_msg="Workflow internal API authentication is not configured",
+            )
+        headers = {
+            "Content-Type": "application/json",
+            "x-consumer-username": self.appId,
+            WORKFLOW_INTERNAL_API_KEY_HEADER: internal_api_key,
+        }
+        headers.update(
+            inject_trusted_langfuse_context(
+                method="POST",
+                audience=AGENT_TRACE_AUDIENCE,
+                tenant_id=self.appId,
+            )
+        )
+        return headers
+
     async def _call_agent(
         self,
         inputs: dict,
@@ -293,22 +334,12 @@ class AgentNode(BaseNode):
         self._normalize_tools()
 
         # Construct request headers
-        headers = {
-            "Content-Type": "application/json",
-            "x-consumer-username": self.appId,
-        }
-        headers.update(
-            inject_trusted_langfuse_context(
-                method="POST",
-                audience=AGENT_TRACE_AUDIENCE,
-                tenant_id=self.appId,
-            )
-        )
+        headers = self._build_agent_request_headers()
 
         req_body = self._generate_agent_request(
             reasoning_instruction, answer_instruction, messages, variable_pool, span
         )
-        logged_headers = redact_trusted_trace_headers(headers)
+        logged_headers = _redact_agent_request_headers(headers)
         sanitized_req_body = serialize_trace_payload(req_body)
         await span.add_info_event_async(f"req header: {logged_headers}")
         await span.add_info_event_async(f"req body: {sanitized_req_body}")

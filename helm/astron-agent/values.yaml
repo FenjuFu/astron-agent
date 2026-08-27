@@ -31,6 +31,30 @@ workflowInternalAuth:
   existingSecret:
     name: ""
     key: "workflow-internal-api-key"
+    # Non-secret version/digest marker. Change it when an external Secret is
+    # rotated in place so all consumers restart and reload the environment.
+    checksum: ""
+
+# Bootstrap identity shared by Tenant, Console Hub, Agent, and Workflow. The
+# tenant ID is intentionally stable because existing data refers to it. Leave
+# key/secret and existingSecret.name empty for a zero-configuration install:
+# Helm creates a strong random Secret and reuses it on live upgrades via
+# `lookup`. For offline GitOps rendering, reference a pre-created Secret because
+# `helm template` cannot look up values already stored in a cluster.
+tenantBootstrap:
+  tenantId: "680ab54f"
+  # Explicit values take precedence over existingSecret and must both contain
+  # 32-50 URL-safe characters. Prefer the managed/default mode or an existing
+  # Secret so credentials do not live in values files.
+  key: ""
+  secret: ""
+  existingSecret:
+    name: ""
+    keyKey: "tenant-key"
+    secretKey: "tenant-secret"
+  # Non-secret version/digest marker. Change it whenever an externally managed
+  # Secret is rotated in place so all consumers restart together.
+  existingSecretChecksum: ""
 
 # Override the full name for consistent resource naming
 fullnameOverride: "astron-agent"
@@ -122,24 +146,20 @@ minio:
   persistence:
     enabled: true
     size: 20Gi
-  # MinIO and every in-chart S3 client read the same pre-created Secret. The
-  # chart intentionally never writes object-storage credentials into values or
-  # rendered manifests. Create this Secret before installation, for example:
-  #   kubectl create secret generic astron-agent-minio-credentials \
-  #     --from-literal=root-user="$(openssl rand -hex 12)" \
-  #     --from-literal=root-password="$(openssl rand -hex 24)"
-  # The runtime preflight rejects empty, short, and well-known credentials.
+  # MinIO and every in-chart S3 client read one shared Secret. By default the
+  # chart creates it from the private, in-cluster quick-start credentials below,
+  # so a normal install needs no credential preparation. Set existingSecret to
+  # reference an operator-managed Secret instead. Change the defaults before
+  # explicitly exposing the MinIO API or console outside the cluster.
   auth:
-    existingSecret: astron-agent-minio-credentials
+    existingSecret: ""
     rootUserKey: root-user
     rootPasswordKey: root-password
     # Non-secret version/digest marker; change it when rotating the Secret in
     # place so MinIO and all S3 consumers roll together.
     existingSecretChecksum: ""
-    # Deprecated compatibility keys. Inline credentials are rejected because
-    # Helm would disclose them in values and rendered release manifests.
-    rootUser: ""
-    rootPassword: ""
+    rootUser: minioadmin
+    rootPassword: minioadmin123
   # Optional exact origin (scheme + host + optional port; no path/query/fragment)
   # used when generating URLs for clients outside the cluster. Core Agent also
   # receives this as SKILL_RESOURCE_TRUSTED_ORIGIN and trusts no other remote
@@ -395,8 +415,10 @@ coreAgent:
     runMcpPluginUrl: "http://astron-agent-core-link:18888/api/v1/mcp/call_tool"
     appAuthHost: astron-agent-core-tenant:5052
     appAuthProt: http
-    appAuthApiKey: 7b709739e8da44536127a333c7603a83
-    appAuthSecret: NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy
+    # Injected from tenantBootstrap; these compatibility keys stay present so
+    # upgrades using older values cannot reintroduce the published credential.
+    appAuthApiKey: ""
+    appAuthSecret: ""
 
 coreKnowledge:
   enabled: true
@@ -499,23 +521,22 @@ consoleHub:
   enabled: true
   image: console-hub
   replicaCount: 1
-  # Internal service credentials. Prefer a pre-created Secret so credentials never
-  # enter values or rendered manifests. The two default Secret names must be
-  # created by the operator before installation with independent random values
-  # under the keys below. When rotating an existing Secret in place,
-  # update existingSecretChecksum to force all three consumers to roll together.
-  # As an alternative, set token to a random value of at least 32 characters; the
-  # chart then creates a dedicated Secret. Explicit tokens take precedence over
-  # existingSecret and are intended mainly for non-GitOps installations.
+  # Internal service credentials. Leave token and existingSecret empty to let
+  # Helm generate two independent random Secrets and preserve them across live
+  # upgrades. For offline GitOps rendering, use pre-created Secrets because
+  # `helm template` cannot look up and reuse cluster values. When rotating an
+  # external Secret in place, update existingSecretChecksum to roll all three
+  # consumers together. Explicit tokens take precedence over existingSecret and
+  # are intended mainly for non-GitOps installations.
   artifactUpload:
     token: ""
-    existingSecret: "astron-agent-artifact-upload-credential"
+    existingSecret: ""
     existingSecretKey: "artifact-upload-token"
     # Non-secret version/digest marker; change whenever the referenced key rotates.
     existingSecretChecksum: ""
   sandboxRuntimeCredential:
     token: ""
-    existingSecret: "astron-agent-sandbox-runtime-credential"
+    existingSecret: ""
     existingSecretKey: "sandbox-runtime-credential-token"
     # Non-secret version/digest marker; change whenever the referenced key rotates.
     existingSecretChecksum: ""
@@ -565,12 +586,12 @@ consoleHub:
     oauth2Audience: astron-agent-client
     # Tenant Configuration (Important!)
     tenantId: "680ab54f"
-    tenantKey: "7b709739e8da44536127a333c7603a83"
-    tenantSecret: "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+    tenantKey: ""
+    tenantSecret: ""
     # Common API Configuration
     commonAppid: "680ab54f"
-    commonApikey: "7b709739e8da44536127a333c7603a83"
-    commonApiSecret: "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+    commonApikey: ""
+    commonApiSecret: ""
     # Service URLs
     appUrl: "http://astron-agent-core-tenant:5052/v2/app"
     knowledgeUrl: "http://astron-agent-core-knowledge:20010/knowledge"
@@ -590,11 +611,11 @@ consoleHub:
     tenantVerifyAppAuth: "http://astron-agent-core-tenant:5052/v2/app/key/verify"
     # MaaS Platform Configuration
     maasAppId: "680ab54f"
-    maasApiKey: "7b709739e8da44536127a333c7603a83"
-    maasApiSecret: "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+    maasApiKey: ""
+    maasApiSecret: ""
     maasConsumerId: "680ab54f"
-    maasConsumerKey: "7b709739e8da44536127a333c7603a83"
-    maasConsumerSecret: "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+    maasConsumerKey: ""
+    maasConsumerSecret: ""
     maasWorkflowVersion: "http://127.0.0.1:8080/workflow/version"
     maasSynchronizeWorkFlow: "http://127.0.0.1:8080/workflow"
     maasPublish: "http://127.0.0.1:8080/workflow/publish"

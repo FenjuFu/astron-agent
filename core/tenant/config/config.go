@@ -20,6 +20,11 @@ type Config struct {
 	Log struct {
 		LogFile string `toml:"path"`
 	} `toml:"log"`
+
+	// TenantBootstrap is loaded only from deployment-managed environment
+	// variables or credential files. It is intentionally omitted from String so
+	// credentials cannot be exposed by routine configuration logging.
+	TenantBootstrap TenantBootstrapCredentials
 }
 
 func (c *Config) String() string {

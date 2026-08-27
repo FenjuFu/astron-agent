@@ -3,6 +3,144 @@ services:
   # Infrastructure Services
   # ============================================================================
 
+  # Generate deployment-internal credentials once and persist them in named
+  # volumes. Existing strong .env overrides are preserved; published legacy
+  # defaults are rotated automatically so upgrades remain zero-configuration.
+  internal-credentials-init:
+    image: busybox:1.35
+    container_name: astron-agent-internal-credentials-init
+    environment:
+      CONFIGURED_WORKFLOW_INTERNAL_API_KEY: "${WORKFLOW_INTERNAL_API_KEY:-}"
+      CONFIGURED_TENANT_KEY: "${TENANT_KEY:-}"
+      CONFIGURED_TENANT_SECRET: "${TENANT_SECRET:-}"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        legacy_tenant_key='7b709739e8da44536127a333c7603a83'
+        legacy_tenant_secret='NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy'
+        workflow_placeholder='CHANGE_ME_WORKFLOW_INTERNAL_API_KEY'
+
+        safe_token() {
+          value="$$1"
+          min_length="$$2"
+          max_length="$$3"
+          [ "$${#value}" -ge "$$min_length" ] || return 1
+          [ "$${#value}" -le "$$max_length" ] || return 1
+          case "$$value" in *[!A-Za-z0-9._~-]*) return 1 ;; esac
+        }
+
+        read_valid_file() {
+          file="$$1"
+          min_length="$$2"
+          max_length="$$3"
+          [ -f "$$file" ] && [ ! -L "$$file" ] || return 1
+          value="$$(sed -n '1p' "$$file")"
+          safe_token "$$value" "$$min_length" "$$max_length" || return 1
+          printf '%s' "$$value"
+        }
+
+        generate_hex() {
+          byte_count="$$1"
+          value="$$(dd if=/dev/urandom bs="$$byte_count" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+          [ "$${#value}" -eq "$$((byte_count * 2))" ] || {
+            echo 'Unable to generate internal credentials.' >&2
+            exit 1
+          }
+          printf '%s' "$$value"
+        }
+
+        write_secret() {
+          directory="$$1"
+          name="$$2"
+          value="$$3"
+          temporary="$$directory/.$$name.tmp.$$$$"
+          mkdir -p "$$directory"
+          printf '%s\n' "$$value" > "$$temporary"
+          chmod 0444 "$$temporary"
+          mv -f "$$temporary" "$$directory/$$name"
+        }
+
+        workflow_key="$$CONFIGURED_WORKFLOW_INTERNAL_API_KEY"
+        if [ "$$workflow_key" = "$$workflow_placeholder" ]; then
+          workflow_key=''
+        fi
+        if [ -n "$$workflow_key" ]; then
+          safe_token "$$workflow_key" 32 128 || {
+            echo 'WORKFLOW_INTERNAL_API_KEY must contain 32-128 safe characters.' >&2
+            exit 1
+          }
+        else
+          workflow_key="$$(read_valid_file /secrets/workflow/workflow-internal-api-key 32 128 || true)"
+          if [ "$$workflow_key" = "$$workflow_placeholder" ]; then
+            workflow_key=''
+          fi
+          [ -n "$$workflow_key" ] || workflow_key="$$(generate_hex 32)"
+        fi
+
+        tenant_key="$$CONFIGURED_TENANT_KEY"
+        tenant_secret="$$CONFIGURED_TENANT_SECRET"
+        if [ "$$tenant_key" = "$$legacy_tenant_key" ] && [ "$$tenant_secret" = "$$legacy_tenant_secret" ]; then
+          tenant_key=''
+          tenant_secret=''
+        fi
+        if [ -n "$$tenant_key" ] || [ -n "$$tenant_secret" ]; then
+          safe_token "$$tenant_key" 32 50 && safe_token "$$tenant_secret" 32 50 && \
+            [ "$$tenant_key" != "$$tenant_secret" ] && \
+            [ "$$tenant_key" != "$$legacy_tenant_key" ] && \
+            [ "$$tenant_secret" != "$$legacy_tenant_secret" ] || {
+            echo 'TENANT_KEY and TENANT_SECRET must be distinct 32-50 character safe values.' >&2
+            exit 1
+          }
+        else
+          tenant_key="$$(read_valid_file /secrets/tenant/tenant-key 32 50 || true)"
+          tenant_secret="$$(read_valid_file /secrets/tenant/tenant-secret 32 50 || true)"
+          if [ "$$tenant_key" = "$$legacy_tenant_key" ] || [ "$$tenant_secret" = "$$legacy_tenant_secret" ] || [ "$$tenant_key" = "$$tenant_secret" ]; then
+            tenant_key=''
+            tenant_secret=''
+          fi
+          if [ -z "$$tenant_key" ] || [ -z "$$tenant_secret" ]; then
+            tenant_key="$$(generate_hex 24)"
+            tenant_secret="$$(generate_hex 24)"
+          fi
+        fi
+
+        write_secret /secrets/workflow workflow-internal-api-key "$$workflow_key"
+        write_secret /secrets/tenant tenant-key "$$tenant_key"
+        write_secret /secrets/tenant tenant-secret "$$tenant_secret"
+
+        workflow_properties="/secrets/workflow/.workflow-internal.properties.tmp.$$$$"
+        printf 'workflow.internal-api-key=%s\n' "$$workflow_key" > "$$workflow_properties"
+        chmod 0444 "$$workflow_properties"
+        mv -f "$$workflow_properties" /secrets/workflow/workflow-internal.properties
+
+        tenant_properties="/secrets/tenant/.tenant-bootstrap.properties.tmp.$$$$"
+        {
+          printf 'api.url.tenantId=680ab54f\n'
+          printf 'api.url.tenantKey=%s\n' "$$tenant_key"
+          printf 'api.url.tenantSecret=%s\n' "$$tenant_secret"
+          printf 'api.url.apiKey=%s\n' "$$tenant_key"
+          printf 'api.url.apiSecret=%s\n' "$$tenant_secret"
+          printf 'common.appid=680ab54f\n'
+          printf 'common.apiKey=%s\n' "$$tenant_key"
+          printf 'common.apiSecret=%s\n' "$$tenant_secret"
+          printf 'maas.appId=680ab54f\n'
+          printf 'maas.apiKey=%s\n' "$$tenant_key"
+          printf 'maas.apiSecret=%s\n' "$$tenant_secret"
+          printf 'maas.consumerId=680ab54f\n'
+          printf 'maas.consumerKey=%s\n' "$$tenant_key"
+          printf 'maas.consumerSecret=%s\n' "$$tenant_secret"
+        } > "$$tenant_properties"
+        chmod 0444 "$$tenant_properties"
+        mv -f "$$tenant_properties" /secrets/tenant/tenant-bootstrap.properties
+        echo 'Internal credentials are initialized.'
+    network_mode: none
+    volumes:
+      - workflow_internal_secrets:/secrets/workflow
+      - tenant_bootstrap_secrets:/secrets/tenant
+    restart: "no"
+
   # PostgreSQL Database
   postgres:
     image: postgres:14
@@ -122,38 +260,35 @@ services:
 #      timeout: ${HEALTH_CHECK_TIMEOUT:-10s}
 #      retries: ${HEALTH_CHECK_RETRIES:-60}
 
-  # Validate object-storage credentials before MinIO starts. Docker Compose can
-  # require non-empty variables during interpolation; this one-shot check also
-  # rejects weak or well-known values without ever printing the credentials.
+  # Validate object-storage configuration before MinIO starts. The bundled
+  # stack has zero-configuration credentials like the other private middleware
+  # services; this one-shot check keeps all consumers aligned without printing
+  # the credentials.
   # The bundled MinIO image does not provision a second application user, so
   # the OSS client credentials must match the configured MinIO root account.
   minio-credentials-check:
     image: busybox:1.35
     container_name: astron-agent-minio-credentials-check
     environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?Set MINIO_ROOT_USER to a unique value of at least 8 characters}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD to a random value of at least 16 characters}"
-      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:?Set OSS_ACCESS_KEY_ID explicitly}"
-      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:?Set OSS_ACCESS_KEY_SECRET explicitly}"
-      OSS_REMOTE_ENDPOINT: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT to an exact http(s) origin}"
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:-${MINIO_ROOT_PASSWORD:-minioadmin123}}"
+      OSS_REMOTE_ENDPOINT: "${OSS_REMOTE_ENDPOINT:-http://minio.localhost:${EXPOSE_MINIO_PORT:-18998}}"
     command:
       - /bin/sh
       - -ec
       - |
-        reject_credential() {
-          echo "Object-storage credentials are empty, weak, or use a known default." >&2
+        reject_configuration() {
+          echo "Object-storage credential configuration is invalid." >&2
           exit 1
         }
-        root_user_lower="$$(printf '%s' "$${MINIO_ROOT_USER}" | tr '[:upper:]' '[:lower:]')"
-        root_password_lower="$$(printf '%s' "$${MINIO_ROOT_PASSWORD}" | tr '[:upper:]' '[:lower:]')"
-        access_key_lower="$$(printf '%s' "$${OSS_ACCESS_KEY_ID}" | tr '[:upper:]' '[:lower:]')"
-        access_secret_lower="$$(printf '%s' "$${OSS_ACCESS_KEY_SECRET}" | tr '[:upper:]' '[:lower:]')"
-        [ "$${#MINIO_ROOT_USER}" -ge 8 ] || reject_credential
-        [ "$${#MINIO_ROOT_PASSWORD}" -ge 16 ] || reject_credential
-        [ "$${#OSS_ACCESS_KEY_ID}" -ge 8 ] || reject_credential
-        [ "$${#OSS_ACCESS_KEY_SECRET}" -ge 16 ] || reject_credential
-        [ "$${MINIO_ROOT_USER}" != "$${MINIO_ROOT_PASSWORD}" ] || reject_credential
-        [ "$${OSS_ACCESS_KEY_ID}" != "$${OSS_ACCESS_KEY_SECRET}" ] || reject_credential
+        [ -n "$${MINIO_ROOT_USER}" ] || reject_configuration
+        [ -n "$${MINIO_ROOT_PASSWORD}" ] || reject_configuration
+        [ -n "$${OSS_ACCESS_KEY_ID}" ] || reject_configuration
+        [ -n "$${OSS_ACCESS_KEY_SECRET}" ] || reject_configuration
+        [ "$${MINIO_ROOT_USER}" != "$${MINIO_ROOT_PASSWORD}" ] || reject_configuration
+        [ "$${OSS_ACCESS_KEY_ID}" != "$${OSS_ACCESS_KEY_SECRET}" ] || reject_configuration
         if [ "$${MINIO_ROOT_USER}" != "$${OSS_ACCESS_KEY_ID}" ] || \
            [ "$${MINIO_ROOT_PASSWORD}" != "$${OSS_ACCESS_KEY_SECRET}" ]; then
           echo "Bundled MinIO requires OSS credentials to match MINIO_ROOT credentials." >&2
@@ -168,11 +303,7 @@ services:
           echo "OSS_REMOTE_ENDPOINT must not contain credentials, a path, query, or fragment." >&2
           exit 1
         esac
-        case "$${root_user_lower}" in minioadmin|admin|administrator|root|changeme|change_me*) reject_credential ;; esac
-        case "$${root_password_lower}" in minioadmin|minioadmin123|admin|admin123|password|password123|changeme|change_me*) reject_credential ;; esac
-        case "$${access_key_lower}" in minioadmin|admin|administrator|root|changeme|change_me*) reject_credential ;; esac
-        case "$${access_secret_lower}" in minioadmin|minioadmin123|admin|admin123|password|password123|changeme|change_me*) reject_credential ;; esac
-        echo "Object-storage credential policy check passed."
+        echo "Object-storage configuration check passed."
     network_mode: none
     restart: "no"
 
@@ -182,9 +313,9 @@ services:
     image: minio/minio:RELEASE.2025-07-23T15-54-02Z
     container_name: astron-agent-minio
     environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?Set MINIO_ROOT_USER to a unique value of at least 8 characters}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD to a random value of at least 16 characters}"
-      MINIO_SERVER_URL: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT to the API URL reachable by intended clients}"
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+      MINIO_SERVER_URL: "${OSS_REMOTE_ENDPOINT:-http://minio.localhost:${EXPOSE_MINIO_PORT:-18998}}"
     ports:
       - "127.0.0.1:${EXPOSE_MINIO_PORT:-18998}:${EXPOSE_MINIO_PORT:-18998}"
       - "127.0.0.1:${EXPOSE_MINIO_CONSOLE_PORT:-18999}:${EXPOSE_MINIO_CONSOLE_PORT:-18999}"
@@ -237,7 +368,12 @@ services:
       DATABASE_MAX_OPEN_CONNS: "${DATABASE_MAX_OPEN_CONNS:-5}"
       DATABASE_MAX_IDLE_CONNS: "${DATABASE_MAX_IDLE_CONNS:-5}"
       LOG_PATH: "${LOG_PATH:-log.txt}"
+      TENANT_ID: "680ab54f"
+      TENANT_KEY_FILE: "/app/secrets/tenant/tenant-key"
+      TENANT_SECRET_FILE: "/app/secrets/tenant/tenant-secret"
     depends_on:
+      internal-credentials-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       mysql:
@@ -250,6 +386,7 @@ services:
       - ./config/tenant/logs:/opt/tenant/logs
       - ./config/tenant/config.toml:/opt/tenant/config/config.toml
       - /etc/localtime:/etc/localtime
+      - tenant_bootstrap_secrets:/app/secrets/tenant:ro
     networks:
       - astron-agent-network
     restart: always
@@ -364,10 +501,10 @@ services:
       SERVICE_PORT: "${CORE_AITOOLS_PORT:-18668}"
       OSS_TYPE: "${OSS_TYPE:-s3}"
       OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:${EXPOSE_MINIO_PORT:-18998}}"
-      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:?Set OSS_ACCESS_KEY_ID explicitly}"
-      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:?Set OSS_ACCESS_KEY_SECRET explicitly}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:-${MINIO_ROOT_PASSWORD:-minioadmin123}}"
       OSS_BUCKET_NAME: "${OSS_BUCKET_NAME}"
-      OSS_DOWNLOAD_HOST: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT explicitly}"
+      OSS_DOWNLOAD_HOST: "${OSS_REMOTE_ENDPOINT:-http://minio.localhost:${EXPOSE_MINIO_PORT:-18998}}"
       OSS_TTL: "${OSS_TTL:-157788000}"
       KAFKA_ENABLE: "${KAFKA_ENABLE:-0}"
       KAFKA_SERVERS: "${KAFKA_SERVERS:-kafka:29092}"
@@ -453,17 +590,20 @@ services:
       RUN_MCP_PLUGIN_URL: "${RUN_MCP_PLUGIN_URL:-http://core-link:18888/api/v1/mcp/call_tool}"
       APP_AUTH_HOST: "${APP_AUTH_HOST:-core-tenant}"
       APP_AUTH_PROT: "${APP_AUTH_PROT:-http}"
-      APP_AUTH_API_KEY: "${APP_AUTH_API_KEY:-YOUR_APP_AUTH_API_KEY}"
-      APP_AUTH_SECRET: "${APP_AUTH_SECRET:-YOUR_APP_AUTH_SECRET}"
+      APP_AUTH_API_KEY_FILE: "/app/secrets/tenant/tenant-key"
+      APP_AUTH_SECRET_FILE: "/app/secrets/tenant/tenant-secret"
+      WORKFLOW_INTERNAL_API_KEY_FILE: "/app/secrets/workflow/workflow-internal-api-key"
       SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN: "${SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN:-}"
       SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN_FILE: "/app/secrets/artifact/artifact-upload-token"
       SKILL_SANDBOX_ARTIFACT_UPLOAD_URL: "http://console-hub:8080/workflow/artifacts/internal-upload"
       SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN: "${SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN:-}"
       SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN_FILE: "/app/secrets/runtime/sandbox-runtime-credential-token"
       SKILL_SANDBOX_RUNTIME_CONFIG_URL: "http://console-hub:8080/skill-sandbox/internal-runtime-config"
-      SKILL_RESOURCE_TRUSTED_ORIGIN: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT to the exact origin used by presigned URLs}"
-      SKILL_RESOURCE_TRUSTED_BUCKET: "${OSS_BUCKET_CONSOLE:?Set OSS_BUCKET_CONSOLE explicitly}"
+      SKILL_RESOURCE_TRUSTED_ORIGIN: "${OSS_REMOTE_ENDPOINT:-http://minio.localhost:${EXPOSE_MINIO_PORT:-18998}}"
+      SKILL_RESOURCE_TRUSTED_BUCKET: "${OSS_BUCKET_CONSOLE:-console-oss}"
     depends_on:
+      internal-credentials-init:
+        condition: service_completed_successfully
       console-hub:
         condition: service_healthy
       postgres:
@@ -478,6 +618,8 @@ services:
       - ./config/agent/config.env:/opt/core/agent/config.env
       - artifact_upload_secrets:/app/secrets/artifact:ro
       - sandbox_runtime_credential_secrets:/app/secrets/runtime:ro
+      - tenant_bootstrap_secrets:/app/secrets/tenant:ro
+      - workflow_internal_secrets:/app/secrets/workflow:ro
     networks:
       - astron-agent-network
     healthcheck:
@@ -534,7 +676,12 @@ services:
     container_name: astron-agent-core-workflow
     environment:
       RUNTIME_ENV: "${RUNTIME_ENV:-dev}"
-      WORKFLOW_INTERNAL_API_KEY: "${WORKFLOW_INTERNAL_API_KEY:-CHANGE_ME_WORKFLOW_INTERNAL_API_KEY}"
+      WORKFLOW_INTERNAL_API_KEY_FILE: "/app/secrets/workflow/workflow-internal-api-key"
+      TENANT_ID: "680ab54f"
+      TENANT_KEY_FILE: "/app/secrets/tenant/tenant-key"
+      TENANT_SECRET_FILE: "/app/secrets/tenant/tenant-secret"
+      APP_MANAGE_PLAT_KEY_FILE: "/app/secrets/tenant/tenant-key"
+      APP_MANAGE_PLAT_SECRET_FILE: "/app/secrets/tenant/tenant-secret"
       SERVICE_PORT: "${CORE_WORKFLOW_PORT:-7880}"
       MYSQL_HOST: "${MYSQL_HOST:-mysql}"
       MYSQL_PORT: "${MYSQL_PORT:-3306}"
@@ -568,10 +715,10 @@ services:
       OTLP_TRACE_EXPORT_TIMEOUT_MILLIS: "${OTLP_TRACE_EXPORT_TIMEOUT_MILLIS:-3000}"
       OSS_TYPE: "${OSS_TYPE:-s3}"
       OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:${EXPOSE_MINIO_PORT:-18998}}"
-      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:?Set OSS_ACCESS_KEY_ID explicitly}"
-      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:?Set OSS_ACCESS_KEY_SECRET explicitly}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:-${MINIO_ROOT_PASSWORD:-minioadmin123}}"
       OSS_BUCKET_NAME: "${OSS_BUCKET_NAME}"
-      OSS_DOWNLOAD_HOST: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT explicitly}"
+      OSS_DOWNLOAD_HOST: "${OSS_REMOTE_ENDPOINT:-http://minio.localhost:${EXPOSE_MINIO_PORT:-18998}}"
       OSS_TTL: "${OSS_TTL:-157788000}"
       KAFKA_ENABLE: "${KAFKA_ENABLE:-0}"
       KAFKA_SERVERS: "${KAFKA_SERVERS:-kafka:29092}"
@@ -592,6 +739,8 @@ services:
       SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN_FILE: "/app/secrets/runtime/sandbox-runtime-credential-token"
       SKILL_SANDBOX_RUNTIME_CONFIG_URL: "http://console-hub:8080/skill-sandbox/internal-runtime-config"
     depends_on:
+      internal-credentials-init:
+        condition: service_completed_successfully
       console-hub:
         condition: service_healthy
       postgres:
@@ -607,6 +756,8 @@ services:
       - ./config/workflow/logs/:/opt/core/logs
       - artifact_upload_secrets:/app/secrets/artifact:ro
       - sandbox_runtime_credential_secrets:/app/secrets/runtime:ro
+      - workflow_internal_secrets:/app/secrets/workflow:ro
+      - tenant_bootstrap_secrets:/app/secrets/tenant:ro
     networks:
       - astron-agent-network
     healthcheck:
@@ -668,7 +819,6 @@ services:
     extra_hosts:
       - "localhost:host-gateway"
     environment:
-      WORKFLOW_INTERNAL_API_KEY: "${WORKFLOW_INTERNAL_API_KEY:-CHANGE_ME_WORKFLOW_INTERNAL_API_KEY}"
       CONSOLE_CASDOOR_URL: "${CONSOLE_CASDOOR_URL:-}"
       CONSOLE_CASDOOR_ID: "${CONSOLE_CASDOOR_ID:-}"
       CONSOLE_CASDOOR_APP: "${CONSOLE_CASDOOR_APP:-}"
@@ -682,10 +832,10 @@ services:
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
       REDIS_DATABASE_CONSOLE: "${REDIS_DATABASE_CONSOLE:-0}"
       OSS_ENDPOINT: "${OSS_ENDPOINT:-http://minio:${EXPOSE_MINIO_PORT:-18998}}"
-      OSS_REMOTE_ENDPOINT: "${OSS_REMOTE_ENDPOINT:?Set OSS_REMOTE_ENDPOINT explicitly}"
-      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:?Set OSS_ACCESS_KEY_ID explicitly}"
-      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:?Set OSS_ACCESS_KEY_SECRET explicitly}"
-      OSS_BUCKET_CONSOLE: "${OSS_BUCKET_CONSOLE:?Set OSS_BUCKET_CONSOLE explicitly}"
+      OSS_REMOTE_ENDPOINT: "${OSS_REMOTE_ENDPOINT:-http://minio.localhost:${EXPOSE_MINIO_PORT:-18998}}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:-${MINIO_ROOT_PASSWORD:-minioadmin123}}"
+      OSS_BUCKET_CONSOLE: "${OSS_BUCKET_CONSOLE:-console-oss}"
       OSS_PRESIGN_EXPIRY_SECONDS_CONSOLE: "${OSS_PRESIGN_EXPIRY_SECONDS_CONSOLE:-600}"
       OAUTH2_ISSUER_URI: "${OAUTH2_ISSUER_URI:-http://auth-server:8000}"
       OAUTH2_JWK_SET_URI: "${OAUTH2_JWK_SET_URI:-http://auth-server:8000/.well-known/jwks}"
@@ -697,12 +847,6 @@ services:
       WORKFLOW_CHAT_URL: "${WORKFLOW_CHAT_URL:-http://core-workflow:7880/workflow/v1/chat/completions}"
       WORKFLOW_DEBUG_URL: "${WORKFLOW_DEBUG_URL:-http://core-workflow:7880/workflow/v1/debug/chat/completions}"
       WORKFLOW_RESUME_URL: "${WORKFLOW_RESUME_URL:-http://core-workflow:7880/workflow/v1/resume}"
-      COMMON_APPID: "${COMMON_APPID:-appid}"
-      COMMON_APIKEY: "${COMMON_APIKEY:-apiKey}"
-      COMMON_API_SECRET: "${COMMON_API_SECRET:-apiSecret}"
-      TENANT_ID: "${TENANT_ID:-tenantId}"
-      TENANT_KEY: "${TENANT_KEY:-tenantKey}"
-      TENANT_SECRET: "${TENANT_SECRET:-tenantSecret}"
       ADMIN_UID: "${ADMIN_UID:-9999}"
       APP_URL: "${APP_URL:-}"
       KNOWLEDGE_URL: "${KNOWLEDGE_URL:-}"
@@ -714,12 +858,6 @@ services:
       SPARK_DB_TYPE: "${SPARK_DB_TYPE:-postgresql}"
       LOCAL_MODEL_URL: "${LOCAL_MODEL_URL:-}"
       RPA_URL: "${RPA_URL_INTERNAL:-${RPA_URL}}"
-      MAAS_APP_ID: "${MAAS_APP_ID:-your-maas-app-id}"
-      MAAS_API_KEY: "${MAAS_API_KEY:-your-maas-api-key}"
-      MAAS_API_SECRET: "${MAAS_API_SECRET:-your-maas-api-secret}"
-      MAAS_CONSUMER_ID: "${MAAS_CONSUMER_ID:-your-maas-consumer-id}"
-      MAAS_CONSUMER_SECRET: "${MAAS_CONSUMER_SECRET:-your-maas-consumer-secret}"
-      MAAS_CONSUMER_KEY: "${MAAS_CONSUMER_KEY:-your-maas-consumer-key}"
       MAAS_WORKFLOW_VERSION: "${MAAS_WORKFLOW_VERSION:-}"
       MAAS_SYNCHRONIZE_WORK_FLOW: "${MAAS_SYNCHRONIZE_WORK_FLOW:-}"
       MAAS_PUBLISH: "${MAAS_PUBLISH:-}"
@@ -747,10 +885,14 @@ services:
     volumes:
       - artifact_upload_secrets:/app/secrets/artifact
       - sandbox_runtime_credential_secrets:/app/secrets/runtime
+      - workflow_internal_secrets:/app/secrets/workflow:ro
+      - tenant_bootstrap_secrets:/app/secrets/tenant:ro
 
     expose:
       - "8080"
     depends_on:
+      internal-credentials-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       mysql:
@@ -796,4 +938,8 @@ volumes:
   artifact_upload_secrets:
     driver: local
   sandbox_runtime_credential_secrets:
+    driver: local
+  workflow_internal_secrets:
+    driver: local
+  tenant_bootstrap_secrets:
     driver: local

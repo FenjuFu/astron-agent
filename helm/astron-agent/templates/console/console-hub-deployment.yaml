@@ -1,8 +1,9 @@
 {{- if .Values.consoleHub.enabled }}
-{{- $workflowAuth := default (dict) .Values.workflowInternalAuth }}
-{{- $workflowAuthExisting := default (dict) (get $workflowAuth "existingSecret") }}
-{{- $workflowAuthSecretName := default (printf "%s-workflow-internal-auth" (include "astron-agent.fullname" .)) (get $workflowAuthExisting "name") }}
-{{- $workflowAuthSecretKey := default "workflow-internal-api-key" (get $workflowAuthExisting "key") }}
+{{- $workflowAuthSecretName := include "astron-agent.workflowInternalAuthSecretName" . }}
+{{- $workflowAuthSecretKey := include "astron-agent.workflowInternalAuthSecretKey" . }}
+{{- $tenantBootstrapSecretName := include "astron-agent.tenantBootstrapSecretName" . }}
+{{- $tenantBootstrapKeyKey := include "astron-agent.tenantBootstrapSecretKeyKey" . }}
+{{- $tenantBootstrapSecretKey := include "astron-agent.tenantBootstrapSecretSecretKey" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,6 +25,10 @@ spec:
         checksum/sandbox-runtime-credential-secret: {{ include "astron-agent.sandboxRuntimeCredentialSecretChecksum" . | quote }}
         internal-secret-name/sandbox-runtime-credential: {{ include "astron-agent.sandboxRuntimeCredentialSecretName" . | quote }}
         checksum/object-storage-secret: {{ include "astron-agent.minioSecretChecksum" . | quote }}
+        checksum/workflow-internal-auth-secret: {{ include "astron-agent.workflowInternalAuthSecretChecksum" . | quote }}
+        internal-secret-name/workflow-internal-auth: {{ $workflowAuthSecretName | quote }}
+        checksum/tenant-bootstrap-secret: {{ include "astron-agent.tenantBootstrapSecretChecksum" . | quote }}
+        internal-secret-name/tenant-bootstrap: {{ $tenantBootstrapSecretName | quote }}
       labels:
         {{- include "astron-agent.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: console-hub
@@ -127,11 +132,50 @@ spec:
             secretKeyRef:
               name: {{ include "astron-agent.minioSecretName" $ }}
               key: {{ include "astron-agent.minioSecretPasswordKey" $ }}
+        {{- else if has $key (list "tenantId" "tenantKey" "tenantSecret" "appApikey" "appApiSecret") }}
+        {{/* The canonical TENANT_* variables are injected once below. */}}
+        {{- else if has $key (list "commonAppid" "maasAppId" "maasConsumerId") }}
+        - name: {{ upper (snakecase $key) }}
+          value: {{ include "astron-agent.tenantBootstrapID" $ | quote }}
+        {{- else if has $key (list "commonApikey" "maasApiKey" "maasConsumerKey") }}
+        - name: {{ upper (snakecase $key) }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapKeyKey }}
+        {{- else if has $key (list "commonApiSecret" "maasApiSecret" "maasConsumerSecret") }}
+        - name: {{ upper (snakecase $key) }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapSecretKey }}
         {{- else }}
         - name: {{ upper (snakecase $key) }}
           value: {{ $value | quote }}
         {{- end }}
         {{- end }}
+        - name: TENANT_ID
+          value: {{ include "astron-agent.tenantBootstrapID" . | quote }}
+        - name: TENANT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapKeyKey }}
+        - name: TENANT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapSecretKey }}
+        - name: APP_APIKEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapKeyKey }}
+        - name: APP_API_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapSecretKey }}
         - name: SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN
           valueFrom:
             secretKeyRef:

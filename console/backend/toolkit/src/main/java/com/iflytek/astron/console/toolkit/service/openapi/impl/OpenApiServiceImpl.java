@@ -9,7 +9,6 @@ import com.iflytek.astron.console.commons.entity.workflow.Workflow;
 import com.iflytek.astron.console.commons.exception.BusinessException;
 import com.iflytek.astron.console.commons.mapper.bot.ChatBotApiMapper;
 import com.iflytek.astron.console.toolkit.entity.biz.workflow.BizWorkflowData;
-import com.iflytek.astron.console.toolkit.entity.dto.external.AppInfoResponse;
 import com.iflytek.astron.console.toolkit.entity.dto.openapi.WorkflowIoTransRequest;
 import com.iflytek.astron.console.toolkit.service.external.ExternalApiService;
 import com.iflytek.astron.console.toolkit.service.openapi.OpenApiService;
@@ -41,10 +40,12 @@ public class OpenApiServiceImpl implements OpenApiService {
     @Override
     public List<JSONObject> getWorkflowIoTransformations(WorkflowIoTransRequest request) {
         try {
-            String appId = getAppIdByApiKey(request.getApiKey());
+            String appId = externalApiService
+                    .verifyAppCredentials(request.getApiKey(), request.getApiSecret())
+                    .orElseThrow(() -> new BusinessException(ResponseEnum.UNAUTHORIZED));
 
             if (!StringUtils.hasText(appId)) {
-                log.error("appId is empty, apiKey:{}", request.getApiKey());
+                log.error("Application credential verification returned an empty appId");
                 throw new BusinessException(ResponseEnum.UNAUTHORIZED);
             }
 
@@ -72,22 +73,6 @@ public class OpenApiServiceImpl implements OpenApiService {
         LambdaQueryWrapper<ChatBotApi> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ChatBotApi::getAppId, appId);
         return chatBotApiMapper.selectList(queryWrapper);
-    }
-
-    /**
-     * Get appId by calling external API with apiKey
-     */
-    private String getAppIdByApiKey(String apiKey) {
-        AppInfoResponse appInfoResponse = externalApiService.getAppInfoByApiKey(apiKey);
-        if (appInfoResponse.getCode() != 0 || appInfoResponse.getData() == null) {
-            log.error("Failed to get app info from external API: code={}, message={}",
-                    appInfoResponse.getCode(), appInfoResponse.getMessage());
-            throw new BusinessException(ResponseEnum.DATA_NOT_FOUND);
-        }
-
-        String appId = appInfoResponse.getData().getAppid();
-        log.info("Successfully retrieved appId: {} for apiKey: {}", appId, apiKey);
-        return appId;
     }
 
     /**

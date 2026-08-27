@@ -12,6 +12,21 @@ from common.otlp.trace.span import Span
 from pydantic import BaseModel, Field
 
 from agent.exceptions.middleware_exc import AppAuthFailedExc
+from agent.infra.credentials import credential_from_env_or_file
+
+APP_AUTH_API_KEY_PLACEHOLDERS = (
+    "YOUR_APP_AUTH_API_KEY",
+    "xxxx",
+    "7b709739e8da44536127a333c7603a83",
+)
+APP_AUTH_SECRET_PLACEHOLDERS = (
+    "YOUR_APP_AUTH_SECRET",
+    "xxxx",
+    "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy",
+)
+APP_AUTH_CREDENTIAL_MIN_LENGTH = 32
+APP_AUTH_CREDENTIAL_MAX_LENGTH = 50
+TENANT_INTERNAL_API_KEY_HEADER = "X-Tenant-Internal-Key"
 
 
 def http_date(dt: datetime.datetime) -> str:
@@ -74,8 +89,20 @@ class APPAuth:
             host=os.getenv("APP_AUTH_HOST", "") or "",
             route=os.getenv("APP_AUTH_ROUTER", "") or "",
             prot=os.getenv("APP_AUTH_PROT", "") or "",
-            api_key=os.getenv("APP_AUTH_API_KEY", "") or "",
-            secret=os.getenv("APP_AUTH_SECRET", "") or "",
+            api_key=credential_from_env_or_file(
+                "APP_AUTH_API_KEY",
+                "APP_AUTH_API_KEY_FILE",
+                min_length=APP_AUTH_CREDENTIAL_MIN_LENGTH,
+                max_length=APP_AUTH_CREDENTIAL_MAX_LENGTH,
+                placeholders=APP_AUTH_API_KEY_PLACEHOLDERS,
+            ),
+            secret=credential_from_env_or_file(
+                "APP_AUTH_SECRET",
+                "APP_AUTH_SECRET_FILE",
+                min_length=APP_AUTH_CREDENTIAL_MIN_LENGTH,
+                max_length=APP_AUTH_CREDENTIAL_MAX_LENGTH,
+                placeholders=APP_AUTH_SECRET_PLACEHOLDERS,
+            ),
         )
         # Set current time
         self.date = http_date(datetime.datetime.utcnow())
@@ -112,6 +139,7 @@ class APPAuth:
             "Date": self.date,
             "Digest": digest,
             "Authorization": auth_header,
+            TENANT_INTERNAL_API_KEY_HEADER: self.config.secret,
         }
         return headers
 
@@ -146,7 +174,25 @@ class MaasAuth(BaseModel):
             app_detail = await APPAuth().app_detail(self.app_id)
 
             sp.add_info_events(
-                {"kong-app-detail": json.dumps(app_detail, ensure_ascii=False)}
+                {
+                    "kong-app-detail": json.dumps(
+                        {
+                            "available": app_detail is not None,
+                            "code": (
+                                app_detail.get("code")
+                                if isinstance(app_detail, dict)
+                                else None
+                            ),
+                            "result_count": (
+                                len(app_detail.get("data", []))
+                                if isinstance(app_detail, dict)
+                                and isinstance(app_detail.get("data", []), list)
+                                else 0
+                            ),
+                        },
+                        ensure_ascii=False,
+                    )
+                }
             )
 
             if app_detail is None:
@@ -165,9 +211,11 @@ class MaasAuth(BaseModel):
 
             api_key = auth_list[0].get("api_key")
             api_secret = auth_list[0].get("api_secret")
+            if not api_key or not api_secret:
+                raise AppAuthFailedExc(self.app_id_not_found_msg)
 
             kong_sk = f"{api_key}:{api_secret}"
 
-            sp.add_info_events({"kong-sk": kong_sk})
+            sp.add_info_events({"kong-sk-retrieved": True})
 
             return kong_sk

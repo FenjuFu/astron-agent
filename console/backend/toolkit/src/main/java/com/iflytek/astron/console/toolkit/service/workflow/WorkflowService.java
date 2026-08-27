@@ -32,6 +32,7 @@ import com.iflytek.astron.console.commons.exception.BusinessException;
 import com.iflytek.astron.console.commons.mapper.UserLangChainInfoMapper;
 import com.iflytek.astron.console.commons.mapper.bot.ChatBotBaseMapper;
 import com.iflytek.astron.console.commons.response.ApiResult;
+import com.iflytek.astron.console.commons.security.WorkflowInternalApiKey;
 import com.iflytek.astron.console.commons.service.bot.BotMarketDataService;
 import com.iflytek.astron.console.commons.service.space.SpaceUserService;
 import com.iflytek.astron.console.commons.util.RequestContextUtil;
@@ -179,9 +180,6 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     public static final String NODE_DEBUG_PATH = "/workflow/v1/node/debug/";
     public static final String PROTOCOL_BUILD_PATH = "/workflow/v1/protocol/build/";
     public static final String CODE_RUN_PATH = "/workflow/v1/run";
-    private static final String WORKFLOW_INTERNAL_API_KEY_HEADER = "X-Workflow-Internal-Key";
-    private static final String WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER =
-            "CHANGE_ME_WORKFLOW_INTERNAL_API_KEY";
     public static final String CLONED_SUFFIX_PATTERN = "[(]\\d+[)]$";
 
     private static final String JSON_KEY_BOT_ID = "botId";
@@ -1368,7 +1366,13 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         String url = apiUrl.getWorkflow().concat(PROTOCOL_BUILD_PATH).concat(workflow.getFlowId());
         log.info("workflow protocol build, url = {}, flowId = {}", url, workflow.getFlowId());
 
-        Request request = new Request.Builder().url(url).post(Util.EMPTY_REQUEST).build();
+        Request request = new Request.Builder()
+                .url(url)
+                .header(
+                        WorkflowInternalApiKey.HEADER,
+                        WorkflowInternalApiKey.requireConfigured(workflowInternalApiKey))
+                .post(Util.EMPTY_REQUEST)
+                .build();
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<Integer> buildStatus = new AtomicReference<>();
         AtomicBoolean invalidResponse = new AtomicBoolean();
@@ -1853,7 +1857,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
                 url,
                 body.getBytes(StandardCharsets.UTF_8).length);
 
-        String response = OkHttpUtil.post(url, body);
+        String response = OkHttpUtil.post(url, workflowInternalHeaders(), body);
         Result<?> result = JSON.parseObject(response, Result.class);
         log.info(
                 "workflow protocol add response, url = {}, statusCode = {}",
@@ -1894,7 +1898,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
                 flowId,
                 body.getBytes(StandardCharsets.UTF_8).length);
 
-        String response = OkHttpUtil.post(url, body);
+        String response = OkHttpUtil.post(url, workflowInternalHeaders(), body);
         Result<?> result = JSON.parseObject(response, Result.class);
         log.info(
                 "workflow protocol delete response, url = {}, flowId = {}, statusCode = {}",
@@ -3489,7 +3493,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         // body = StringEscapeUtils.unescapeJava(body);
 
         logWorkflowProtocolUpdate(url, flowId, body, protocolJson);
-        String response = OkHttpUtil.post(url, body);
+        String response = OkHttpUtil.post(url, workflowInternalHeaders(), body);
         Result<?> result = JSON.parseObject(response, Result.class);
         log.info(
                 "workflow protocol update response, url = {}, flowId = {}, statusCode = {}",
@@ -3656,13 +3660,9 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     }
 
     private Map<String, String> workflowInternalHeaders() {
-        if (StringUtils.isBlank(workflowInternalApiKey)
-                || WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER.equals(workflowInternalApiKey)) {
-            throw new IllegalStateException(
-                    "WORKFLOW_INTERNAL_API_KEY must be configured before calling workflow debug APIs");
-        }
         return Collections.singletonMap(
-                WORKFLOW_INTERNAL_API_KEY_HEADER, workflowInternalApiKey);
+                WorkflowInternalApiKey.HEADER,
+                WorkflowInternalApiKey.requireConfigured(workflowInternalApiKey));
     }
 
     private void injectScriptSandboxIntoCodeNodes(List<BizWorkflowNode> nodes, String flowId) {
@@ -4300,6 +4300,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             Map<String, String> headerMap = new HashMap<>();
             headerMap.put(HttpHeaders.AUTHORIZATION, akSk.getApiKey() + ":" + akSk.getApiSecret());
             headerMap.put("X-Consumer-Username", workflow.getAppId());
+            headerMap.putAll(workflowInternalHeaders());
 
             ChatSysReq sysReq = new ChatSysReq();
             sysReq.setFlowId(flowId);
@@ -4367,6 +4368,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
             Map<String, String> headerMap = new HashMap<>();
             headerMap.put(HttpHeaders.AUTHORIZATION, akSk.getApiKey() + ":" + akSk.getApiSecret());
             headerMap.put("X-Consumer-Username", workflow.getAppId());
+            headerMap.putAll(workflowInternalHeaders());
 
             JSONObject sysReq = new JSONObject();
             sysReq.put("event_id", bizReq.getEventId());

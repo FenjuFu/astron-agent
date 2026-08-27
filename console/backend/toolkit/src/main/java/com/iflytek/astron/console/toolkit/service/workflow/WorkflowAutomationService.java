@@ -10,6 +10,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.entity.workflow.Workflow;
 import com.iflytek.astron.console.commons.exception.BusinessException;
+import com.iflytek.astron.console.commons.security.WorkflowInternalApiKey;
 import com.iflytek.astron.console.commons.util.space.SpaceInfoUtil;
 import com.iflytek.astron.console.toolkit.common.constant.WorkflowConst;
 import com.iflytek.astron.console.toolkit.config.properties.ApiUrl;
@@ -33,6 +34,7 @@ import com.iflytek.astron.console.toolkit.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
@@ -72,6 +74,9 @@ public class WorkflowAutomationService
     private final RedisUtil redisUtil;
     private final ApiUrl apiUrl;
     private final AppService appService;
+
+    @Value("${workflow.internal-api-key:}")
+    private String workflowInternalApiKey;
 
     public PageData<WorkflowAutomationTask> pageTasks(Integer current, Integer pageSize, String search,
             Boolean enabled) {
@@ -390,6 +395,9 @@ public class WorkflowAutomationService
         Map<String, String> headerMap = new HashMap<>();
         headerMap.put(HttpHeaders.AUTHORIZATION, akSk.getApiKey() + ":" + akSk.getApiSecret());
         headerMap.put("X-Consumer-Username", workflow.getAppId());
+        headerMap.put(
+                WorkflowInternalApiKey.HEADER,
+                WorkflowInternalApiKey.requireConfigured(workflowInternalApiKey));
 
         String response = callWorkflow(task, runId, headerMap, task.getVersion());
         Integer code = workflowResponseCode(response);

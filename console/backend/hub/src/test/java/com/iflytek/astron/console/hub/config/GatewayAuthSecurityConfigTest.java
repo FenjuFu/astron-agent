@@ -30,7 +30,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         value = GatewayAuthController.class,
         properties = {
                 "skill.sandbox.artifact-upload-token=0123456789abcdef0123456789abcdef",
-                "skill.sandbox.runtime-credential.token=abcdef0123456789abcdef0123456789"
+                "skill.sandbox.runtime-credential.token=abcdef0123456789abcdef0123456789",
+                "workflow.internal-api-key=0123456789abcdef0123456789abcdef"
         })
 @Import({
         SecurityConfig.class,
@@ -64,9 +65,20 @@ class GatewayAuthSecurityConfigTest {
         when(gatewayAuthService.authenticateWorkflow("Bearer key:secret")).thenReturn("app-123");
 
         mockMvc.perform(get("/internal/gateway/auth/workflow")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer key:secret"))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer key:secret")
+                        .header("X-Original-URI", "/workflow/v1/chat/completions?trace_id=123")
+                        .header("X-Original-Method", "POST")
+                        .header("X-Consumer-Username", "attacker")
+                        .header("X-Workflow-Internal-Key", "attacker")
+                        .header("X-Workflow-Gateway-Timestamp", "1")
+                        .header("X-Workflow-Gateway-Signature", "attacker"))
                 .andExpect(status().isNoContent())
-                .andExpect(header().string("X-Consumer-Username", "app-123"));
+                .andExpect(header().string("X-Consumer-Username", "app-123"))
+                .andExpect(header().exists("X-Workflow-Gateway-Timestamp"))
+                .andExpect(header().string(
+                        "X-Workflow-Gateway-Signature",
+                        org.hamcrest.Matchers.matchesPattern("^[0-9a-f]{64}$")))
+                .andExpect(header().doesNotExist("X-Workflow-Internal-Key"));
 
         verify(gatewayAuthService).authenticateWorkflow("Bearer key:secret");
         verify(jwtDecoder, never()).decode(anyString());

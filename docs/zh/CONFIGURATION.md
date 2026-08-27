@@ -17,6 +17,17 @@
 - **主机地址配置**:
   - `HOST_BASE_ADDRESS` - 设置为您的服务器地址或域名
 
+- **部署内部认证（无需手动配置）**：
+  - `.env` 中 `WORKFLOW_INTERNAL_API_KEY`、`TENANT_KEY`、`TENANT_SECRET`
+    留空时，Docker Compose 会在首次启动时自动生成并持久化；Helm 在安装和在线
+    升级时会自动生成并复用对应 Secret。仍可显式提供高强度值覆盖，但正常启动
+    不需要用户填写。
+
+- **Sandbox 内部认证**：
+  - `.env` 中 artifact-upload 与 runtime token 留空时，Docker Compose 会自动生成
+    并持久化。Helm 的 `token` 与 `existingSecret` 均留空时同样自动生成；离线
+    GitOps 渲染应使用两个预创建且相互独立的 Secret，确保多次渲染时值保持稳定。
+
 **启动后在平台账号管理中配置的业务能力账号**（不写入 `.env`）：
 
 - **讯飞开放平台**：`PLATFORM_APP_ID`、`PLATFORM_API_KEY`、`PLATFORM_API_SECRET`、`SPARK_API_PASSWORD`、`SPARK_RTASR_API_KEY`
@@ -47,8 +58,8 @@
 >   - Kafka 相关：`KAFKA_SERVERS` 及认证信息（如需要）
 >   - MinIO 相关：`OSS_ENDPOINT`、`OSS_DOWNLOAD_HOST`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` 等
 >
-> **MinIO 安全默认值**：
-> - Docker Compose 不再内置 MinIO 凭据。必须设置唯一的 `MINIO_ROOT_USER`/`OSS_ACCESS_KEY_ID`（至少 8 个字符）和随机的 `MINIO_ROOT_PASSWORD`/`OSS_ACCESS_KEY_SECRET`（至少 16 个字符）；MinIO 启动前会拒绝空值、短值、占位符及已知默认值。
+> **MinIO 默认配置**：
+> - 为保持 Docker Compose 一键部署体验，内置 MinIO 默认使用 `minioadmin`/`minioadmin123`，OSS 客户端凭据自动从同一组值派生，无需手动填写。替换为外部对象存储时，需通过显式 Compose override 同时替换内置 MinIO 及其配置检查，并同步配置外部 endpoint、access key 和 secret key。
 > - 内置 MinIO API 与管理控制台在宿主机上只绑定 `127.0.0.1`，应用容器通过私有 Compose 网络访问配置的 API 端口；`minio.localhost` 让本地浏览器与容器使用同一个签名主机名。远程访问必须显式通过单独保护的 TLS 代理提供，禁止将 MinIO 直接发布到不可信网络。
 > - Helm Chart 不渲染 MinIO 凭据，需预先创建 `minio.auth.existingSecret`。内置 API 与控制台默认为相互独立的 `ClusterIP` Service；`NodePort`/`LoadBalancer` 必须显式启用，开放 API 不会连带开放控制台。
 
@@ -79,14 +90,14 @@
 | KAFKA_CLUSTER_ID | 使用默认 | string | Kafka 集群 ID | MkU3OEVBNTcwNTJENDM2Qk |
 | KAFKA_TIMEOUT | 使用默认 | int | Kafka 连接超时时间(秒) | 60 |
 | KAFKA_SERVERS | 使用默认 | string | Kafka 服务器地址列表 | kafka:29092 |
-| MINIO_ROOT_USER | 用户必填 | string | 唯一的 MinIO 管理员用户名，至少 8 个字符且无内置默认值 | （无默认值） |
-| MINIO_ROOT_PASSWORD | 用户必填 | string | 随机的 MinIO 管理员密码，至少 16 个字符且无内置默认值 | （无默认值） |
+| MINIO_ROOT_USER | 使用默认 | string | 内置 MinIO 管理员用户名；对外提供 MinIO 服务时应覆盖 | minioadmin |
+| MINIO_ROOT_PASSWORD | 使用默认 | string | 内置 MinIO 管理员密码；对外提供 MinIO 服务时应覆盖 | minioadmin123 |
 | EXPOSE_MINIO_PORT | 使用默认 | int | 仅绑定宿主机回环地址的 MinIO API 运维端口（Compose 固定绑定 `127.0.0.1`） | 18998 |
 | EXPOSE_MINIO_CONSOLE_PORT | 使用默认 | int | 仅绑定宿主机回环地址的 MinIO 控制台运维端口（Compose 固定绑定 `127.0.0.1`） | 18999 |
 | OSS_TYPE | 使用默认 | string | 对象存储类型(s3/oss/obs 等) | s3 |
 | OSS_ENDPOINT | 使用默认 | url | 对象存储服务端点地址 | http://minio:${EXPOSE_MINIO_PORT} |
-| OSS_ACCESS_KEY_ID | 用户必填 | string | 显式配置的对象存储访问密钥 ID；使用内置 MinIO 时通常等于已配置的 MinIO 用户名 | ${MINIO_ROOT_USER} |
-| OSS_ACCESS_KEY_SECRET | 用户必填 | string | 显式配置的随机对象存储访问密钥 Secret | ${MINIO_ROOT_PASSWORD} |
+| OSS_ACCESS_KEY_ID | 使用默认 | string | 对象存储访问密钥 ID；内置 MinIO 默认从管理员用户名派生 | ${MINIO_ROOT_USER:-minioadmin} |
+| OSS_ACCESS_KEY_SECRET | 使用默认 | string | 对象存储访问密钥 Secret；内置 MinIO 默认从管理员密码派生 | ${MINIO_ROOT_PASSWORD:-minioadmin123} |
 | OSS_BUCKET_NAME | 使用默认 | string | 对象存储桶名称 | workflow |
 | OSS_TTL | 使用默认 | int | 对象存储 URL 有效期(秒) | 157788000 |
 | OSS_DOWNLOAD_HOST | 使用默认 | url | 下载 URL 使用的端点；`minio.localhost` 在本地浏览器解析为宿主机回环地址，在容器内解析为 MinIO 私有网络别名，从而保持签名 Host 一致 | http://minio.localhost:${EXPOSE_MINIO_PORT} |
@@ -225,8 +236,8 @@
 | RUN_MCP_PLUGIN_URL | 必填 | url | 运行 MCP 插件的接口地址 | http://core-link:18888/api/v1/mcp/call_tool |
 | APP_AUTH_HOST | 必填 | string | 应用认证服务主机地址(默认从 CORE_TENANT_PORT 获取端口) | core-tenant:${CORE_TENANT_PORT:-5052} |
 | APP_AUTH_PROT | 必填 | string | 应用认证服务协议(http/https) | http |
-| APP_AUTH_API_KEY | 必填 | string | 应用认证 API Key | 7b709739e8da44536127a333c7603a83 |
-| APP_AUTH_SECRET | 必填 | string | 应用认证 Secret | NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy |
+| APP_AUTH_API_KEY | 自动派生 | secret | 从自动生成的租户 bootstrap 凭据加载的应用认证 API Key | 自动生成并持久化 |
+| APP_AUTH_SECRET | 自动派生 | secret | 从自动生成的租户 bootstrap 凭据加载的应用认证 Secret | 自动生成并持久化 |
 | SKILL_RESOURCE_TRUSTED_ORIGIN | 自动派生 | URL origin | Core Agent 仅允许从该远程 origin 获取 Skill 资源；Compose 从 `OSS_REMOTE_ENDPOINT` 派生，Helm 从 `minio.publicEndpoint`/最终生效的 MinIO 公共端点派生，其他 URL origin 默认均不受信任 | http://minio.localhost:${EXPOSE_MINIO_PORT} |
 | SKILL_RESOURCE_TRUSTED_BUCKET | 自动派生 | string | Core Agent 仅接受该存储桶中的远程 Skill 资源；Compose/Helm 从 `OSS_BUCKET_CONSOLE`/`consoleHub.env.ossBucketConsole` 派生，并进一步限制对象键必须位于 `skill-files/` 且包含完整 SigV4 参数 | console-oss |
 
@@ -257,6 +268,7 @@
 | WORKFLOW_MYSQL_DB | 必填 | string | Workflow 模块使用的 MySQL 数据库名称 | workflow |
 | WORKFLOW_KAFKA_TOPIC | 必填 | string | Workflow 使用的 Kafka 主题名称 | spark-agent-builder |
 | RUNTIME_ENV | 必填 | string | 运行环境(dev/test/prod) | dev |
+| WORKFLOW_INTERNAL_API_KEY | 自动生成 | secret | 用于可信内部调用访问 Workflow 特权接口；Compose 与 Helm 会自动生成并持久化，显式覆盖值需为 32-128 个安全字符 | 自动生成并持久化 |
 
 ---
 
@@ -281,8 +293,8 @@
 | WORKFLOW_DEBUG_URL | 必填 | url | 工作流调试接口地址(默认从 CORE_WORKFLOW_PORT 获取端口) | http://core-workflow:${CORE_WORKFLOW_PORT:-7880}/workflow/v1/debug/chat/completions |
 | WORKFLOW_RESUME_URL | 必填 | url | 工作流恢复接口地址(默认从 CORE_WORKFLOW_PORT 获取端口) | http://core-workflow:${CORE_WORKFLOW_PORT:-7880}/workflow/v1/resume |
 | TENANT_ID | 必填 | string | 租户 ID | 680ab54f |
-| TENANT_KEY | 必填 | string | 租户 API Key | 7b709739e8da44536127a333c7603a83 |
-| TENANT_SECRET | 必填 | string | 租户 Secret | NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy |
+| TENANT_KEY | 自动生成 | secret | Compose 或 Helm 自动生成并持久化的租户 API Key；正常启动时保持留空 | 自动生成并持久化 |
+| TENANT_SECRET | 自动生成 | secret | Compose 或 Helm 自动生成并持久化的租户 Secret；正常启动时保持留空 | 自动生成并持久化 |
 | COMMON_APPID | 必填 | string | 通用应用 ID(默认从 TENANT_ID 获取) | ${TENANT_ID} |
 | COMMON_APIKEY | 必填 | string | 通用 API Key(默认从 TENANT_KEY 获取) | ${TENANT_KEY} |
 | COMMON_API_SECRET | 必填 | string | 通用 API Secret(默认从 TENANT_SECRET 获取) | ${TENANT_SECRET} |

@@ -3,6 +3,7 @@
 import json
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -34,7 +35,7 @@ class _DummySidGen:
 
 
 @pytest.fixture(autouse=True)
-def _setup_test_environment() -> None:
+def _setup_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Automatically inject environment fixes for all tests.
 
     - Ensure `sid_generator2` is initialized to avoid `Span` construction failure.
@@ -42,6 +43,7 @@ def _setup_test_environment() -> None:
     # Initialize sid generator to avoid Span throwing "sid_generator2 is not initialized"
     if sid_module.sid_generator2 is None:
         sid_module.sid_generator2 = _DummySidGen()  # type: ignore[assignment]
+    monkeypatch.setenv("WORKFLOW_INTERNAL_API_KEY", "i" * 32)
 
 
 class TestPluginBase:
@@ -251,6 +253,7 @@ class TestWorkflowPluginRunnerAndFactory:
             "bot_id": "workflow",
             "caller": "agent",
         }
+        assert params["extra_headers"]["X-Workflow-Internal-Key"] == "i" * 32
         assert "extra_body" not in params["extra_body"]
 
     @pytest.mark.asyncio
@@ -319,6 +322,97 @@ class TestWorkflowPluginRunnerAndFactory:
         assert ok_resp.result["reasoning_content"] == "r"
 
     @pytest.mark.asyncio
+    async def test_query_workflow_schema_sends_internal_key_without_logging_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import aiohttp
+
+        import agent.service.plugin.workflow as workflow_module
+
+        configured_key = "q" * 32
+        monkeypatch.setenv("WORKFLOW_INTERNAL_API_KEY", configured_key)
+        monkeypatch.delenv("WORKFLOW_INTERNAL_API_KEY_FILE", raising=False)
+
+        class DummyConfig:
+            GET_WORKFLOWS_URL = "http://workflow/sparkflow/v1/protocol/get"
+
+        monkeypatch.setattr(workflow_module, "agent_config", DummyConfig())
+        captured: dict[str, Any] = {}
+        disclosed_api_key = "workflow-api-key-must-not-enter-telemetry"
+        disclosed_api_secret = "workflow-api-secret-must-not-enter-telemetry"
+        protocol_marker = "workflow-protocol-body-must-not-enter-telemetry"
+        payload = {
+            "code": 0,
+            "sid": "safe-request-id",
+            "data": {
+                "data": {
+                    "id": "flow-1",
+                    "apiKey": disclosed_api_key,
+                    "apiSecret": disclosed_api_secret,
+                    "data": {"nodes": [{"prompt": protocol_marker}]},
+                }
+            },
+        }
+
+        class ResponseContextManager:
+            async def __aenter__(self) -> "ResponseContextManager":
+                return self
+
+            async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
+                return False
+
+            def raise_for_status(self) -> None:
+                return None
+
+            async def json(self) -> dict[str, Any]:
+                return payload
+
+        def fake_post(
+            _session: aiohttp.ClientSession, url: str, **kwargs: Any
+        ) -> ResponseContextManager:
+            captured.update({"url": url, **kwargs})
+            return ResponseContextManager()
+
+        monkeypatch.setattr(aiohttp.ClientSession, "post", fake_post)
+        span = MagicMock(spec=Span)
+        span_context = MagicMock()
+        span.start.return_value.__enter__.return_value = span_context
+
+        result = await WorkflowPluginFactory.do_query_workflow_schema("flow-1", span)
+
+        assert result == payload
+        assert captured["headers"] == {"X-Workflow-Internal-Key": configured_key}
+        telemetry_calls = span_context.add_info_events.call_args_list
+        telemetry_text = repr(telemetry_calls)
+        assert configured_key not in telemetry_text
+        assert disclosed_api_key not in telemetry_text
+        assert disclosed_api_secret not in telemetry_text
+        assert protocol_marker not in telemetry_text
+        output_attributes = telemetry_calls[1].kwargs["attributes"]
+        output_summary = json.loads(
+            output_attributes["workflow-plugin-do-query-workflow-schema-outputs"]
+        )
+        assert output_summary == {
+            "code": 0,
+            "sid": "safe-request-id",
+            "flow_id": "flow-1",
+            "has_data": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_query_workflow_schema_fails_closed_without_internal_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("WORKFLOW_INTERNAL_API_KEY", raising=False)
+        monkeypatch.delenv("WORKFLOW_INTERNAL_API_KEY_FILE", raising=False)
+        span = MagicMock(spec=Span)
+        span_context = MagicMock()
+        span.start.return_value.__enter__.return_value = span_context
+
+        with pytest.raises(PluginExc):
+            await WorkflowPluginFactory.do_query_workflow_schema("flow-1", span)
+
+    @pytest.mark.asyncio
     async def test_workflow_runner_timeout(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -382,6 +476,8 @@ class TestWorkflowPluginRunnerAndFactory:
             assert "baggage" not in logged_request
             assert "x-astron-langfuse-trace-timestamp" not in logged_request
             assert "x-astron-langfuse-trace-signature" not in logged_request
+            assert "X-Workflow-Internal-Key" not in logged_request
+            assert "i" * 32 not in logged_request
         finally:
             provider.shutdown()
 

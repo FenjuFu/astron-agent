@@ -275,6 +275,24 @@ class TestBaseApiBuilder:
         assert model.llm.api_key == "provided_key"
 
     @pytest.mark.asyncio
+    async def test_create_model_does_not_record_api_credentials(
+        self, builder: BaseApiBuilder
+    ) -> None:
+        credential = "tenant-key:tenant-secret-must-not-reach-telemetry"
+
+        with patch.object(builder.span, "add_info_events") as add_info_events:
+            await builder.create_model(
+                app_id="test_app",
+                model_name="test_model",
+                base_url="https://api.test.com",
+                api_key=credential,
+            )
+
+        recorded_events = repr(add_info_events.call_args_list)
+        assert credential not in recorded_events
+        assert "model_auth_configured" in recorded_events
+
+    @pytest.mark.asyncio
     async def test_create_anthropic_model(self, builder: BaseApiBuilder) -> None:
         model = await builder.create_model(
             app_id="test_app",

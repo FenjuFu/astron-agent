@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,7 +19,6 @@ import (
 )
 
 func Run() error {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
 	configPath := flag.String("config", "./config/config.toml", "config file path")
 	flag.Parse()
 	cfg, err := config.LoadConfig(*configPath)
@@ -28,6 +26,11 @@ func Run() error {
 		log.Fatalf("config load failed: %s\n", err)
 		return err
 	}
+	tenantBootstrap, err := config.LoadTenantBootstrapCredentials()
+	if err != nil {
+		return fmt.Errorf("load tenant bootstrap credentials failed: %w", err)
+	}
+	cfg.TenantBootstrap = tenantBootstrap
 	err = initLog(cfg)
 	if err != nil {
 		return err

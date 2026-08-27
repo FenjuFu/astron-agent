@@ -165,12 +165,29 @@ class WorkflowServiceSandboxConfigTest {
     @Test
     void workflowInternalHeadersUseConfiguredSecret() {
         ReflectionTestUtils.setField(
-                workflowService, "workflowInternalApiKey", "internal-secret");
+                workflowService,
+                "workflowInternalApiKey",
+                "0123456789abcdef0123456789abcdef");
 
         Map<String, String> headers = ReflectionTestUtils.invokeMethod(
                 workflowService, "workflowInternalHeaders");
 
         assertThat(headers)
-                .containsEntry("X-Workflow-Internal-Key", "internal-secret");
+                .containsEntry(
+                        "X-Workflow-Internal-Key",
+                        "0123456789abcdef0123456789abcdef");
+    }
+
+    @Test
+    void workflowInternalHeadersRejectPublishedPlaceholder() {
+        ReflectionTestUtils.setField(
+                workflowService,
+                "workflowInternalApiKey",
+                "CHANGE_ME_WORKFLOW_INTERNAL_API_KEY");
+
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                workflowService, "workflowInternalHeaders"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageNotContaining("CHANGE_ME_WORKFLOW_INTERNAL_API_KEY");
     }
 }

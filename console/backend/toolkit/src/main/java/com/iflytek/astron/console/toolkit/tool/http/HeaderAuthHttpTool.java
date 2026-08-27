@@ -1,6 +1,7 @@
 package com.iflytek.astron.console.toolkit.tool.http;
 
 import com.alibaba.fastjson2.JSON;
+import com.iflytek.astron.console.commons.security.TenantInternalApiKey;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 
@@ -54,10 +55,16 @@ public class HeaderAuthHttpTool {
         Request request = build.put(requestBody).build();
         OkHttpClient client = new OkHttpClient.Builder().build();
         String res;
+        int statusCode;
         try (Response resp = client.newCall(request).execute()) {
+            statusCode = resp.code();
             res = JSON.parse(Objects.requireNonNull(resp.body()).bytes()).toString();
         }
-        log.debug("HeaderAuthHttpTool [{}]url = {}, body = {}, resp = {}", param.getMethod(), url, body, res);
+        log.debug(
+                "HeaderAuthHttpTool {} completed, status={}, responseChars={}",
+                param.getMethod(),
+                statusCode,
+                res.length());
         return res;
     }
 
@@ -91,10 +98,16 @@ public class HeaderAuthHttpTool {
         Request request = build.delete(requestBody).build();
         OkHttpClient client = new OkHttpClient.Builder().build();
         String res;
+        int statusCode;
         try (Response resp = client.newCall(request).execute()) {
+            statusCode = resp.code();
             res = JSON.parse(Objects.requireNonNull(resp.body()).bytes()).toString();
         }
-        log.debug("HeaderAuthHttpTool [{}]url = {}, body = {}, resp = {}", param.getMethod(), url, body, res);
+        log.debug(
+                "HeaderAuthHttpTool {} completed, status={}, responseChars={}",
+                param.getMethod(),
+                statusCode,
+                res.length());
         return res;
     }
 
@@ -110,6 +123,26 @@ public class HeaderAuthHttpTool {
      * @throws IOException if the HTTP request fails
      */
     public static String get(String url, String apiKey, String apiSecret) throws NoSuchAlgorithmException, InvalidKeyException, IOException {
+        return get(url, apiKey, apiSecret, null);
+    }
+
+    /**
+     * Executes an authenticated HTTP GET against core-tenant and attaches its internal service
+     * credential. Keeping this operation explicit prevents the Tenant credential from being sent to
+     * arbitrary callers of the generic HTTP methods.
+     */
+    public static String tenantGet(String url, String apiKey, String apiSecret)
+            throws NoSuchAlgorithmException, InvalidKeyException, IOException {
+        return get(
+                url,
+                apiKey,
+                apiSecret,
+                TenantInternalApiKey.requireConfigured(apiSecret));
+    }
+
+    private static String get(
+            String url, String apiKey, String apiSecret, String tenantInternalKey)
+            throws NoSuchAlgorithmException, InvalidKeyException, IOException {
         AssembleParam param = new AssembleParam();
         param.setApiKey(apiKey);
         param.setApiSecret(apiSecret);
@@ -120,16 +153,23 @@ public class HeaderAuthHttpTool {
                 addHeader("Content-Type", "text/html").//
                 addHeader("Date", headMap.get("date")).//
                 addHeader("Host", headMap.get("host"));
+        if (tenantInternalKey != null) {
+            build.header(TenantInternalApiKey.HEADER, tenantInternalKey);
+        }
         build.addHeader("Authorization", headMap.get("authorization"));
         Request request = build.get().build();
         OkHttpClient client = new OkHttpClient.Builder().build();
         String res;
+        int statusCode;
         try (Response resp = client.newCall(request).execute()) {
-            log.info("HeaderAuthHttpTool get resp = {}", resp);
+            statusCode = resp.code();
             ResponseBody body = resp.body();
             res = JSON.parse(Objects.requireNonNull(body).bytes()).toString();
         }
-        log.debug(url + " call result: " + res);
+        log.debug(
+                "HeaderAuthHttpTool GET completed, status={}, responseChars={}",
+                statusCode,
+                res.length());
         return res;
     }
 
@@ -146,7 +186,6 @@ public class HeaderAuthHttpTool {
      * @throws InvalidKeyException if the API secret is invalid
      */
     public static String post(String url, String apiKey, String apiSecret, String body) throws IOException, NoSuchAlgorithmException, InvalidKeyException {
-        System.out.println(body);
         AssembleParam param = new AssembleParam();
         param.setApiKey(apiKey);
         param.setApiSecret(apiSecret);
@@ -164,10 +203,16 @@ public class HeaderAuthHttpTool {
         Request request = build.post(requestBody).build();
         OkHttpClient client = new OkHttpClient.Builder().build();
         String res;
+        int statusCode;
         try (Response resp = client.newCall(request).execute()) {
+            statusCode = resp.code();
             res = JSON.parse(Objects.requireNonNull(resp.body()).bytes()).toString();
         }
-        log.debug("HeaderAuthHttpTool [{}]url = {}, body = {}, resp = {}", param.getMethod(), url, body, res);
+        log.debug(
+                "HeaderAuthHttpTool {} completed, status={}, responseChars={}",
+                param.getMethod(),
+                statusCode,
+                res.length());
         return res;
     }
 
@@ -184,7 +229,6 @@ public class HeaderAuthHttpTool {
      * @throws InvalidKeyException if the API secret is invalid
      */
     public static String patch(String url, String apiKey, String apiSecret, String body) throws IOException, NoSuchAlgorithmException, InvalidKeyException {
-        System.out.println(body);
         AssembleParam param = new AssembleParam();
         param.setApiKey(apiKey);
         param.setApiSecret(apiSecret);
@@ -202,10 +246,16 @@ public class HeaderAuthHttpTool {
         Request request = build.patch(requestBody).build();
         OkHttpClient client = new OkHttpClient.Builder().build();
         String res;
+        int statusCode;
         try (Response resp = client.newCall(request).execute()) {
+            statusCode = resp.code();
             res = JSON.parse(Objects.requireNonNull(resp.body()).bytes()).toString();
         }
-        log.debug("HeaderAuthHttpTool [{}]url = {}, body = {}, resp = {}", param.getMethod(), url, body, res);
+        log.debug(
+                "HeaderAuthHttpTool {} completed, status={}, responseChars={}",
+                param.getMethod(),
+                statusCode,
+                res.length());
         return res;
     }
 
@@ -239,7 +289,6 @@ public class HeaderAuthHttpTool {
         if (headMap.containsKey("digest")) {
             builder.append("\n").append("digest: ").append(headMap.get("digest"));
         }
-        System.out.println("builder:" + builder.toString());
         Charset charset = StandardCharsets.UTF_8;
         Mac mac = Mac.getInstance("hmacsha256");
         SecretKeySpec spec = new SecretKeySpec(param.getApiSecret().getBytes(charset), "hmacsha256");
@@ -249,7 +298,6 @@ public class HeaderAuthHttpTool {
         if (headMap.containsKey("digest")) {
             String authorization = String.format("hmac username=\"%s\", algorithm=\"%s\", headers=\"%s\", signature=\"%s\"", //
                     param.getApiKey(), "hmac-sha256", "host date request-line digest", sign);
-            System.out.println(authorization);
             headMap.put("authorization", authorization);
             return headMap;
         }

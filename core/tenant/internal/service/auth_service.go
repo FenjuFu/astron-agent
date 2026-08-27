@@ -20,6 +20,7 @@ type authAppDao interface {
 	Count(bool, *sql.Tx, ...dao.SqlOption) (int64, error)
 	Select(...dao.SqlOption) ([]*models.App, error)
 	WithAppId(string) dao.SqlOption
+	WithIsDisable(bool) dao.SqlOption
 	WithIsDelete(bool) dao.SqlOption
 }
 
@@ -160,12 +161,16 @@ func (biz *AuthService) queryAppByAuth(data []*models.Auth) (*models.App, error)
 	if len(data[0].AppId) == 0 {
 		return nil, NewBizErr(AppIdNotExist, "app id not exist")
 	}
-	appList, err := biz.appDao.Select(biz.appDao.WithAppId(data[0].AppId), biz.appDao.WithIsDelete(false))
+	appList, err := biz.appDao.Select(
+		biz.appDao.WithAppId(data[0].AppId),
+		biz.appDao.WithIsDisable(false),
+		biz.appDao.WithIsDelete(false),
+	)
 	if err != nil {
 		log.Printf("query app  info by app id %s error: %v", data[0].AppId, err)
 		return nil, NewBizErr(ErrCodeSystem, err.Error())
 	}
-	if len(appList) == 0 || appList[0] == nil {
+	if len(appList) == 0 || appList[0] == nil || appList[0].IsDisable || appList[0].IsDelete {
 		return nil, NewBizErr(AppIdNotExist, "app id not exist")
 	}
 	return appList[0], nil

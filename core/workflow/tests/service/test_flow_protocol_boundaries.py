@@ -127,14 +127,14 @@ def test_get_latest_published_sanitizes_cached_release_protocol() -> None:
     }
 
 
-def test_cache_uses_v2_namespace_and_never_receives_unsanitized_flow() -> None:
+def test_cache_uses_v3_namespace_and_never_receives_unsanitized_flow() -> None:
     cache_service = MagicMock()
     source = Flow(id=101, group_id=101, data=_legacy_protocol())
 
     with patch.object(flow_cache, "get_cache_service", return_value=cache_service):
         flow_cache.set_flow_by_id("101", source)
 
-    assert cache_service.set.call_args.kwargs["key"] == "workflow:flow_info:v2:101"
+    assert cache_service.set.call_args.kwargs["key"] == "workflow:flow_info:v3:101"
     cached = cache_service.set.call_args.kwargs["value"]
     assert cached is not source
     assert cached.data["data"]["nodes"][0]["sandbox"] == {

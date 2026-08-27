@@ -126,7 +126,9 @@ class WorkflowImportDependencyGuardTest {
         ReflectionTestUtils.setField(workflowService, "apiUrl", apiUrl);
         ReflectionTestUtils.setField(workflowService, "configInfoMapper", configInfoMapper);
         ReflectionTestUtils.setField(
-                workflowService, "workflowInternalApiKey", "internal-secret");
+                workflowService,
+                "workflowInternalApiKey",
+                "0123456789abcdef0123456789abcdef");
         ReflectionTestUtils.setField(
                 workflowService, "skillSandboxConfigService", skillSandboxConfigService);
         ConfigInfo multiRoundTypes = new ConfigInfo();
@@ -347,7 +349,9 @@ class WorkflowImportDependencyGuardTest {
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
                     eq("http://core/workflow/v1/node/debug/"),
-                    eq(Map.of("X-Workflow-Internal-Key", "internal-secret")),
+                    eq(Map.of(
+                            "X-Workflow-Internal-Key",
+                            "0123456789abcdef0123456789abcdef")),
                     anyString()))
                     .thenReturn("{\"code\":0,\"data\":{\"result\":\"ok\"}}");
 
@@ -355,7 +359,9 @@ class WorkflowImportDependencyGuardTest {
 
             okHttp.verify(() -> OkHttpUtil.post(
                     eq("http://core/workflow/v1/node/debug/"),
-                    eq(Map.of("X-Workflow-Internal-Key", "internal-secret")),
+                    eq(Map.of(
+                            "X-Workflow-Internal-Key",
+                            "0123456789abcdef0123456789abcdef")),
                     anyString()), times(1));
         }
 
@@ -472,7 +478,9 @@ class WorkflowImportDependencyGuardTest {
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
             okHttp.when(() -> OkHttpUtil.post(
                     eq("http://core/workflow/v1/run"),
-                    eq(Map.of("X-Workflow-Internal-Key", "internal-secret")),
+                    eq(Map.of(
+                            "X-Workflow-Internal-Key",
+                            "0123456789abcdef0123456789abcdef")),
                     anyString()))
                     .thenAnswer(invocation -> {
                         forwardedBody.set(invocation.getArgument(2));
