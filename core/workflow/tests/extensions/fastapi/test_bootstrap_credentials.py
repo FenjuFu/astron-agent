@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from datetime import datetime
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine, select  # type: ignore
+from sqlmodel import Session, SQLModel, create_engine  # type: ignore
 
 from workflow.domain.models.ai_app import App
 from workflow.domain.models.app_source import AppSource

@@ -4,6 +4,7 @@ import base64
 import datetime
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -159,7 +160,7 @@ class TestAPPAuth:
             pytest.fail("Signature should be valid base64 encoded")
 
     def test_loads_credentials_from_files(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         key_file = tmp_path / "tenant-key"
         secret_file = tmp_path / "tenant-secret"
@@ -176,7 +177,7 @@ class TestAPPAuth:
         assert auth.config.secret == "s" * 48
 
     def test_placeholder_environment_values_do_not_shadow_credential_files(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         key_file = tmp_path / "tenant-key"
         secret_file = tmp_path / "tenant-secret"
