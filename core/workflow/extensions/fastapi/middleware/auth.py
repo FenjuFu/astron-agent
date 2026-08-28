@@ -333,7 +333,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         Get the app id with cache
 
-        :param credential_cache_key: HMAC-SHA256 digest of the complete credential pair
+        :param credential_cache_key: PBKDF2-HMAC digest of the complete credential pair
         :return: The app id
         """
         cache_service = get_cache_service()
@@ -346,7 +346,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         Set the app id with cache
 
-        :param credential_cache_key: HMAC-SHA256 digest of the complete credential pair
+        :param credential_cache_key: PBKDF2-HMAC digest of the complete credential pair
         :param app_id: The app id
         """
         cache_service = get_cache_service()
