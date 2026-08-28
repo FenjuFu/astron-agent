@@ -39,6 +39,18 @@ from workflow.extensions.otlp.log_trace.workflow_log import WorkflowLog
 from workflow.extensions.otlp.trace.span import Span
 from workflow.repository import flow_dao, license_dao
 from workflow.service import audit_service, ops_service
+from workflow.utils.protocol_sanitization import (
+    sanitize_protocol,
+    sanitize_protocol_document_for_use,
+)
+from workflow.utils.trace_sanitization import serialize_trace_payload
+
+
+def _sanitize_flow_for_use(flow: Flow) -> Flow:
+    """Replace protocol fields with safe copies before return or execution."""
+    flow.data = sanitize_protocol_document_for_use(flow.data)
+    flow.release_data = sanitize_protocol_document_for_use(flow.release_data)
+    return flow
 
 
 def save(flow: Flow, app_info: App, session: Session, span: Span) -> Flow:
@@ -57,7 +69,7 @@ def save(flow: Flow, app_info: App, session: Session, span: Span) -> Flow:
         id=flow_id,
         group_id=flow_id,
         name=flow.name,
-        data=flow.data,
+        data=sanitize_protocol(flow.data),
         description=flow.description,
         app_id=flow.app_id,
         source=app_info.actual_source,
@@ -99,7 +111,7 @@ def update(
         if flow.app_id:
             db_flow.app_id = flow.app_id
         if flow.data:
-            db_flow.data = flow.data
+            db_flow.data = sanitize_protocol(flow.data)
 
         session.add(db_flow)
         session.commit()
@@ -121,10 +133,11 @@ def get(flow_id: str, session: Session, span: Span) -> Flow:
     """
     db_flow = flow_cache.get_flow_by_id(flow_id)
     if db_flow:
-        return db_flow
+        return _sanitize_flow_for_use(db_flow)
     db_flow = session.query(Flow).filter_by(id=int(flow_id)).first()
     if not db_flow:
         raise CustomException(CodeEnum.FLOW_NOT_FOUND_ERROR)
+    _sanitize_flow_for_use(db_flow)
     flow_cache.set_flow_by_id(flow_id, db_flow)
     return db_flow
 
@@ -152,7 +165,7 @@ def get_flow_by_version(
         )
 
     if db_flow:
-        return db_flow
+        return _sanitize_flow_for_use(db_flow)
     raise CustomException(CodeEnum.FLOW_NOT_FOUND_ERROR)
 
 
@@ -169,7 +182,7 @@ def get_comparison(flow_id: str, version: str, session: Session, span: Span) -> 
         .first()
     )
     if comparison:
-        return comparison
+        return _sanitize_flow_for_use(comparison)
     raise CustomException(CodeEnum.FLOW_NOT_FOUND_ERROR)
 
 
@@ -195,7 +208,7 @@ def get_latest_published(
     else:
         flow = flow_cache.get_flow_by_flow_id_version(int(flow_id), version)
     if flow:
-        return flow
+        return _sanitize_flow_for_use(flow)
 
     # Query database if not found in cache
     db_flow = get(flow_id, session, span)
@@ -206,6 +219,8 @@ def get_latest_published(
     )
     if not published_flow:
         raise CustomException(CodeEnum.FLOW_NOT_PUBLISH_ERROR)
+
+    _sanitize_flow_for_use(published_flow)
 
     # Cache the result for future requests
     if not version:
@@ -323,7 +338,9 @@ async def node_debug(
     """
     # Record start time for performance measurement
     time_start = time.time() * 1000
-    await span.add_info_event_async(f"node debug dsl: {workflow_dsl.dict()}")
+    await span.add_info_event_async(
+        f"node debug dsl: {serialize_trace_payload(workflow_dsl.dict())}"
+    )
 
     # Perform input audit for security and compliance
     await audit_service.node_debug_input_audit(workflow_dsl.dict(), span)

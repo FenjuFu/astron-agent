@@ -806,6 +806,30 @@ def test_non_finite_numbers_are_standard_json_nulls() -> None:
     }
 
 
+def test_serialized_json_strings_and_presigned_urls_are_recursively_redacted() -> None:
+    signature = "SIGNED-QUERY-MUST-NOT-LEAK"
+    token = "NESTED-TOKEN-MUST-NOT-LEAK"
+    embedded = json.dumps(
+        {
+            "downloadUrl": (
+                "https://objects.example/console/skill-files/a.md?"
+                f"X-Amz-Signature={signature}&X-Amz-Expires=300"
+            ),
+            "nested": json.dumps({"artifactUploadToken": token, "safe": "ok"}),
+        }
+    )
+
+    serialized = serialize_langfuse_value({"payload": embedded})
+
+    assert serialized is not None
+    assert signature not in serialized
+    assert token not in serialized
+    outer = json.loads(serialized)
+    decoded = json.loads(outer["payload"])
+    assert decoded["downloadUrl"] == "[REDACTED_PRESIGNED_URL]"
+    assert json.loads(decoded["nested"]) == {"safe": "ok"}
+
+
 @pytest.mark.parametrize(
     "header_name",
     ["x-api-key", "X-Api-Key", "x-goog-api-key", "X_Custom_Api_Key"],

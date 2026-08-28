@@ -82,6 +82,10 @@ class MaasUtilTest {
         ReflectionTestUtils.setField(maasUtil, "consumerKey", "test-key");
         ReflectionTestUtils.setField(maasUtil, "publishApi", "http://test.com/publish");
         ReflectionTestUtils.setField(maasUtil, "authApi", "http://test.com/auth");
+        ReflectionTestUtils.setField(
+                maasUtil,
+                "workflowInternalApiKey",
+                "0123456789abcdef0123456789abcdef");
         ReflectionTestUtils.setField(maasUtil, "mcpHost", "http://test.com/mcp");
         ReflectionTestUtils.setField(maasUtil, "mcpReleaseUrl", "http://test.com/mcp/release");
     }

@@ -4,8 +4,9 @@ global:
   imagePullPolicy: IfNotPresent
   storageClass: ""
   astronAgentVersion: latest
-  # Host base address for external access (e.g., http://your-domain.com)
-  # Used for MinIO server URL and other external endpoints
+  # Host base address for application access (e.g., https://your-domain.com).
+  # MinIO endpoints are configured independently under minio so enabling an
+  # application ingress never exposes object storage by accident.
   hostBaseAddress: "http://astron-agent.example.com"
 
 # Optional Langfuse OTLP/HTTP export shared by Agent and Workflow.
@@ -23,6 +24,37 @@ langfuse:
     secretKeyKey: "secret-key"
     # Independent Astron-only secret, not a Langfuse project credential.
     traceContextSecretKey: "trace-context-secret"
+
+# Shared authentication for privileged console-hub -> core-workflow calls.
+# Leave the name empty to let Helm generate and preserve a random Secret.
+workflowInternalAuth:
+  existingSecret:
+    name: ""
+    key: "workflow-internal-api-key"
+    # Non-secret version/digest marker. Change it when an external Secret is
+    # rotated in place so all consumers restart and reload the environment.
+    checksum: ""
+
+# Bootstrap identity shared by Tenant, Console Hub, Agent, and Workflow. The
+# tenant ID is intentionally stable because existing data refers to it. Leave
+# key/secret and existingSecret.name empty for a zero-configuration install:
+# Helm creates a strong random Secret and reuses it on live upgrades via
+# `lookup`. For offline GitOps rendering, reference a pre-created Secret because
+# `helm template` cannot look up values already stored in a cluster.
+tenantBootstrap:
+  tenantId: "680ab54f"
+  # Explicit values take precedence over existingSecret and must both contain
+  # 32-50 URL-safe characters. Prefer the managed/default mode or an existing
+  # Secret so credentials do not live in values files.
+  key: ""
+  secret: ""
+  existingSecret:
+    name: ""
+    keyKey: "tenant-key"
+    secretKey: "tenant-secret"
+  # Non-secret version/digest marker. Change it whenever an externally managed
+  # Secret is rotated in place so all consumers restart together.
+  existingSecretChecksum: ""
 
 # Override the full name for consistent resource naming
 fullnameOverride: "astron-agent"
@@ -114,15 +146,44 @@ minio:
   persistence:
     enabled: true
     size: 20Gi
+  # MinIO and every in-chart S3 client read one shared Secret. By default the
+  # chart creates it from the private, in-cluster quick-start credentials below,
+  # so a normal install needs no credential preparation. Set existingSecret to
+  # reference an operator-managed Secret instead. Change the defaults before
+  # explicitly exposing the MinIO API or console outside the cluster.
   auth:
+    existingSecret: ""
+    rootUserKey: root-user
+    rootPasswordKey: root-password
+    # Non-secret version/digest marker; change it when rotating the Secret in
+    # place so MinIO and all S3 consumers roll together.
+    existingSecretChecksum: ""
     rootUser: minioadmin
     rootPassword: minioadmin123
+  # Optional exact origin (scheme + host + optional port; no path/query/fragment)
+  # used when generating URLs for clients outside the cluster. Core Agent also
+  # receives this as SKILL_RESOURCE_TRUSTED_ORIGIN and trusts no other remote
+  # Skill resource origin; consoleHub.env.ossBucketConsole is injected as the
+  # matching SKILL_RESOURCE_TRUSTED_BUCKET. Empty keeps URLs on the internal origin.
+  publicEndpoint: ""
+  # Required when minio.enabled=false and an enabled component uses S3.
+  # The same existingSecret above must contain credentials for this endpoint.
+  external:
+    endpoint: ""
+    # Must also be an exact origin when configured.
+    publicEndpoint: ""
   service:
-    type: NodePort
+    type: ClusterIP
     apiPort: 9000
-    consolePort: 9001
-    nodePort: 30900
-    consoleNodePort: 30901
+    nodePort: null
+  # The console is a separate service so exposing the API explicitly does not
+  # also expose the administrative UI. Keep ClusterIP and use port-forward for
+  # local maintenance; set NodePort/LoadBalancer only as an explicit opt-in.
+  consoleService:
+    enabled: true
+    type: ClusterIP
+    port: 9001
+    nodePort: null
   healthCheck:
     interval: 30
     timeout: 10
@@ -275,9 +336,11 @@ coreAitools:
     port: 18668
   env:
     servicePort: 18668
+    # Derived from minio.publicEndpoint/external.publicEndpoint by the template.
     ossDownloadHost: ""
     ossType: s3
-    ossEndpoint: "http://astron-agent-minio:9000"
+    # Derived from the global minio endpoint by the template.
+    ossEndpoint: ""
     ossAccessKeyId: ""
     ossAccessKeySecret: ""
     ossBucketName: "workflow"
@@ -352,8 +415,10 @@ coreAgent:
     runMcpPluginUrl: "http://astron-agent-core-link:18888/api/v1/mcp/call_tool"
     appAuthHost: astron-agent-core-tenant:5052
     appAuthProt: http
-    appAuthApiKey: 7b709739e8da44536127a333c7603a83
-    appAuthSecret: NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy
+    # Injected from tenantBootstrap; these compatibility keys stay present so
+    # upgrades using older values cannot reintroduce the published credential.
+    appAuthApiKey: ""
+    appAuthSecret: ""
 
 coreKnowledge:
   enabled: true
@@ -389,6 +454,7 @@ coreWorkflow:
     port: 7880
   env:
     servicePort: 7880
+    # Derived from minio.publicEndpoint/external.publicEndpoint by the template.
     ossDownloadHost: ""
     runtimeEnv: dev
     mysqlHost: astron-agent-mysql
@@ -411,7 +477,8 @@ coreWorkflow:
     otlpTraceMaxExportBatchSize: "500"
     otlpTraceExportTimeoutMillis: "3000"
     ossType: s3
-    ossEndpoint: "http://astron-agent-minio:9000"
+    # Derived from the global minio endpoint by the template.
+    ossEndpoint: ""
     ossAccessKeyId: ""
     ossAccessKeySecret: ""
     ossBucketName: "workflow"
@@ -454,6 +521,25 @@ consoleHub:
   enabled: true
   image: console-hub
   replicaCount: 1
+  # Internal service credentials. Leave token and existingSecret empty to let
+  # Helm generate two independent random Secrets and preserve them across live
+  # upgrades. For offline GitOps rendering, use pre-created Secrets because
+  # `helm template` cannot look up and reuse cluster values. When rotating an
+  # external Secret in place, update existingSecretChecksum to roll all three
+  # consumers together. Explicit tokens take precedence over existingSecret and
+  # are intended mainly for non-GitOps installations.
+  artifactUpload:
+    token: ""
+    existingSecret: ""
+    existingSecretKey: "artifact-upload-token"
+    # Non-secret version/digest marker; change whenever the referenced key rotates.
+    existingSecretChecksum: ""
+  sandboxRuntimeCredential:
+    token: ""
+    existingSecret: ""
+    existingSecretKey: "sandbox-runtime-credential-token"
+    # Non-secret version/digest marker; change whenever the referenced key rotates.
+    existingSecretChecksum: ""
   resources:
     requests:
       memory: "2Gi"
@@ -481,23 +567,31 @@ consoleHub:
     redisPassword: ""
     redisDatabaseConsole: 0
     # OSS/MinIO Configuration
+    # Both endpoints are derived from the global minio configuration.
     ossRemoteEndpoint: ""
-    ossEndpoint: "http://astron-agent-minio:9000"
+    ossEndpoint: ""
     ossAccessKeyId: ""
     ossAccessKeySecret: ""
     ossBucketConsole: console-oss
     ossPresignExpirySecondsConsole: 600
+    # Workflow artifact storage and validation (non-sensitive). The artifact
+    # bucket must differ from ossBucketConsole because it is kept private.
+    skillSandboxArtifactBucket: workflow-artifacts
+    skillSandboxArtifactMaxFileSize: 20MB
+    skillSandboxArtifactMaxActiveFilesPerWorkflow: 1000
+    skillSandboxArtifactMaxActiveTotalSizePerWorkflow: 1GB
+    skillSandboxArtifactAllowedExtensions: "txt,md,csv,json,pdf,png,jpg,jpeg,gif,webp,doc,docx,xls,xlsx,ppt,pptx,zip"
     oauth2IssuerUri: ""
     oauth2JwkSetUri: "http://astron-agent-casdoor:8000/.well-known/jwks"
     oauth2Audience: astron-agent-client
     # Tenant Configuration (Important!)
     tenantId: "680ab54f"
-    tenantKey: "7b709739e8da44536127a333c7603a83"
-    tenantSecret: "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+    tenantKey: ""
+    tenantSecret: ""
     # Common API Configuration
     commonAppid: "680ab54f"
-    commonApikey: "7b709739e8da44536127a333c7603a83"
-    commonApiSecret: "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+    commonApikey: ""
+    commonApiSecret: ""
     # Service URLs
     appUrl: "http://astron-agent-core-tenant:5052/v2/app"
     knowledgeUrl: "http://astron-agent-core-knowledge:20010/knowledge"
@@ -517,11 +611,11 @@ consoleHub:
     tenantVerifyAppAuth: "http://astron-agent-core-tenant:5052/v2/app/key/verify"
     # MaaS Platform Configuration
     maasAppId: "680ab54f"
-    maasApiKey: "7b709739e8da44536127a333c7603a83"
-    maasApiSecret: "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+    maasApiKey: ""
+    maasApiSecret: ""
     maasConsumerId: "680ab54f"
-    maasConsumerKey: "7b709739e8da44536127a333c7603a83"
-    maasConsumerSecret: "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+    maasConsumerKey: ""
+    maasConsumerSecret: ""
     maasWorkflowVersion: "http://127.0.0.1:8080/workflow/version"
     maasSynchronizeWorkFlow: "http://127.0.0.1:8080/workflow"
     maasPublish: "http://127.0.0.1:8080/workflow/publish"
@@ -543,6 +637,12 @@ consoleHub:
 
 # Ingress configuration
 ingress:
+  # SECURITY: the console API Ingress uses longer regex paths routed to a
+  # selectorless Service for service-only endpoints. The template asserts that
+  # these paths remain longer than the generic /console-api route so ingress-nginx
+  # orders them first. No snippet annotation is required. Other controllers must
+  # provide equivalent longest-path behavior or ingress must remain disabled in
+  # favor of a trusted gateway with an explicit public-path allowlist.
   enabled: true
   className: nginx
   annotations:

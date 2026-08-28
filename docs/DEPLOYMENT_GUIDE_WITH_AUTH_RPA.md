@@ -68,8 +68,8 @@ Before starting AstronAgent services, you need to configure the relevant connect
 # Navigate to astronAgent directory
 cd docker/astronAgent
 
-# Copy environment variable configuration
-cp .env.example .env
+# Create a deployment-only environment file with owner-only permissions
+install -m 600 .env.example .env
 ```
 
 The `.env` file is only used for startup, access addresses, authentication, database, Redis, object storage, and other infrastructure settings. Business capability accounts such as RAGFlow, iFLYTEK Open Platform, AI Ability Chat, Virtual Man, and Spark Knowledge Base are no longer configured in `.env`. Configure them in **Platform Account Management** after AstronAgent starts.
@@ -92,7 +92,8 @@ HOST_BASE_ADDRESS=http://localhost
 
 **Notes:**
 - If you use a domain name for access, replace `localhost` with your domain name
-- Ensure nginx and minio ports are properly exposed
+- Expose only the Astron Agent application entry point (Nginx/Ingress) to users
+- Keep the bundled MinIO API and administrative console on their secure defaults: host loopback only with Docker Compose and `ClusterIP` with Helm. Expose either endpoint only for an explicit operational requirement and only behind independent authentication, TLS, and network-policy/firewall restrictions; never publish MinIO directly to the Internet
 
 #### 2.2 Prepare Business Capability Account Information (configure in the UI after startup)
 
@@ -174,12 +175,16 @@ To start the AstronAgent service, run our [docker-compose-with-auth-rpa.yaml](/d
 # Navigate to the astronAgent directory
 cd docker/astronAgent
 
-# Start all services (includes Casdoor, RPA)
+# Validate the fully rendered credential-sharing and health contract before changing the stack
+python3 scripts/verify_security_contract.py --compose-file docker-compose-with-auth-rpa.yaml
+
+# Start all services (includes Casdoor and the one-shot RPA atlas task)
 docker compose -f docker-compose-with-auth-rpa.yaml up -d
 ```
 
 **Notes:**
 - Casdoor default login username: `admin`, password: `123`
+- When upgrading, update the checked-out Compose files together with the application images. `docker compose pull` updates images only; it does not update `docker-compose.yaml`. Run the repository's deployment-contract preflight before stopping the current stack, preserve `.env` and named volumes, and never use `down -v` during a routine upgrade.
 
 ### Step 4: Configure Platform Account Management (Optional, configure business capabilities as needed)
 

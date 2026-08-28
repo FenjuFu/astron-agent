@@ -162,6 +162,13 @@ We welcome contributions of all kinds! Please see our [Contributing Guide](CONTR
   <img src="./docs/imgs/WeCom_Group.png" alt="WeChat Work Group" width="300">
 </div>
 
+## 🌐 Related Projects
+
+Astron Agent is part of the **[iFlytek Astron](https://github.com/iflytek)** open-source ecosystem. These sibling projects work well alongside it:
+
+- **[SkillHub](https://github.com/iflytek/skillhub)** — Self-hosted, open-source agent skill registry. Publish, version, and govern skill packages, then load and run them from Astron Agent for a managed skill lifecycle from development to production.
+- **[AstronRPA](https://github.com/iflytek/astron-rpa)** — Agent-ready RPA suite with out-of-the-box automation tools. Call RPA workflow nodes directly inside Astron Agent to combine intelligent agents with robotic process automation.
+
 ## 📄 Open Source License
 
 This project is licensed under the [Apache 2.0 License](LICENSE), allowing free use, modification, distribution, and commercial use without any restrictions.

@@ -17,6 +17,17 @@
 - **主机地址配置**:
   - `HOST_BASE_ADDRESS` - 设置为您的服务器地址或域名
 
+- **部署内部认证（无需手动配置）**：
+  - `.env` 中 `WORKFLOW_INTERNAL_API_KEY`、`TENANT_KEY`、`TENANT_SECRET`
+    留空时，Docker Compose 会在首次启动时自动生成并持久化；Helm 在安装和在线
+    升级时会自动生成并复用对应 Secret。仍可显式提供高强度值覆盖，但正常启动
+    不需要用户填写。
+
+- **Sandbox 内部认证**：
+  - `.env` 中 artifact-upload 与 runtime token 留空时，Docker Compose 会自动生成
+    并持久化。Helm 的 `token` 与 `existingSecret` 均留空时同样自动生成；离线
+    GitOps 渲染应使用两个预创建且相互独立的 Secret，确保多次渲染时值保持稳定。
+
 **启动后在平台账号管理中配置的业务能力账号**（不写入 `.env`）：
 
 - **讯飞开放平台**：`PLATFORM_APP_ID`、`PLATFORM_API_KEY`、`PLATFORM_API_SECRET`、`SPARK_API_PASSWORD`、`SPARK_RTASR_API_KEY`
@@ -45,7 +56,12 @@
 >   - MySQL 相关：`MYSQL_HOST`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_URL` 等
 >   - Redis 相关：`REDIS_ADDR`、`REDIS_HOST`、`REDIS_PASSWORD`、`REDIS_PORT` 等
 >   - Kafka 相关：`KAFKA_SERVERS` 及认证信息（如需要）
->   - MinIO 相关：`OSS_ENDPOINT`、`OSS_DOWNLOAD_HOST`、`OSS_ACCESS_KEY_ID`、`OSS_SECRET_KEY` 等
+>   - MinIO 相关：`OSS_ENDPOINT`、`OSS_DOWNLOAD_HOST`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` 等
+>
+> **MinIO 默认配置**：
+> - 为保持 Docker Compose 一键部署体验，内置 MinIO 默认使用 `minioadmin`/`minioadmin123`，OSS 客户端凭据自动从同一组值派生，无需手动填写。替换为外部对象存储时，需通过显式 Compose override 同时替换内置 MinIO 及其配置检查，并同步配置外部 endpoint、access key 和 secret key。
+> - 内置 MinIO API 与管理控制台在宿主机上只绑定 `127.0.0.1`，应用容器通过私有 Compose 网络访问配置的 API 端口；`minio.localhost` 让本地浏览器与容器使用同一个签名主机名。远程访问必须显式通过单独保护的 TLS 代理提供，禁止将 MinIO 直接发布到不可信网络。
+> - Helm Chart 不渲染 MinIO 凭据，需预先创建 `minio.auth.existingSecret`。内置 API 与控制台默认为相互独立的 `ClusterIP` Service；`NodePort`/`LoadBalancer` 必须显式启用，开放 API 不会连带开放控制台。
 
 | 变量名 | 配置类型 | 类型 | 用途说明 | 示例值 |
 |--------|----------|------|----------|--------|
@@ -74,17 +90,31 @@
 | KAFKA_CLUSTER_ID | 使用默认 | string | Kafka 集群 ID | MkU3OEVBNTcwNTJENDM2Qk |
 | KAFKA_TIMEOUT | 使用默认 | int | Kafka 连接超时时间(秒) | 60 |
 | KAFKA_SERVERS | 使用默认 | string | Kafka 服务器地址列表 | kafka:29092 |
-| MINIO_ROOT_USER | 使用默认 | string | MinIO 管理员用户名 | minioadmin |
-| MINIO_ROOT_PASSWORD | 使用默认 | string | MinIO 管理员密码 | minioadmin123 |
-| EXPOSE_MINIO_PORT | 使用默认 | int | MinIO API 对外暴露的端口号 | 18998 |
-| EXPOSE_MINIO_CONSOLE_PORT | 使用默认 | int | MinIO 控制台对外暴露的端口号 | 18999 |
+| MINIO_ROOT_USER | 使用默认 | string | 内置 MinIO 管理员用户名；对外提供 MinIO 服务时应覆盖 | minioadmin |
+| MINIO_ROOT_PASSWORD | 使用默认 | string | 内置 MinIO 管理员密码；对外提供 MinIO 服务时应覆盖 | minioadmin123 |
+| EXPOSE_MINIO_PORT | 使用默认 | int | 仅绑定宿主机回环地址的 MinIO API 运维端口（Compose 固定绑定 `127.0.0.1`） | 18998 |
+| EXPOSE_MINIO_CONSOLE_PORT | 使用默认 | int | 仅绑定宿主机回环地址的 MinIO 控制台运维端口（Compose 固定绑定 `127.0.0.1`） | 18999 |
 | OSS_TYPE | 使用默认 | string | 对象存储类型(s3/oss/obs 等) | s3 |
-| OSS_ENDPOINT | 使用默认 | url | 对象存储服务端点地址 | http://minio:9000 |
-| OSS_ACCESS_KEY_ID | 使用默认 | string | 对象存储访问密钥 ID | ${MINIO_ROOT_USER:-minioadmin} |
-| OSS_ACCESS_KEY_SECRET | 使用默认 | string | 对象存储访问密钥 Secret | ${MINIO_ROOT_PASSWORD:-minioadmin123} |
+| OSS_ENDPOINT | 使用默认 | url | 对象存储服务端点地址 | http://minio:${EXPOSE_MINIO_PORT} |
+| OSS_ACCESS_KEY_ID | 使用默认 | string | 对象存储访问密钥 ID；内置 MinIO 默认从管理员用户名派生 | ${MINIO_ROOT_USER:-minioadmin} |
+| OSS_ACCESS_KEY_SECRET | 使用默认 | string | 对象存储访问密钥 Secret；内置 MinIO 默认从管理员密码派生 | ${MINIO_ROOT_PASSWORD:-minioadmin123} |
 | OSS_BUCKET_NAME | 使用默认 | string | 对象存储桶名称 | workflow |
 | OSS_TTL | 使用默认 | int | 对象存储 URL 有效期(秒) | 157788000 |
-| OSS_DOWNLOAD_HOST | 使用默认 | url | 对象存储下载访问地址 | http://minio:9000 |
+| OSS_DOWNLOAD_HOST | 使用默认 | url | 下载 URL 使用的端点；`minio.localhost` 在本地浏览器解析为宿主机回环地址，在容器内解析为 MinIO 私有网络别名，从而保持签名 Host 一致 | http://minio.localhost:${EXPOSE_MINIO_PORT} |
+
+### Helm MinIO 安全配置
+
+| 配置项 | 配置类型 | 用途说明 | 默认值 / 示例值 |
+|--------|----------|----------|-----------------|
+| `minio.auth.existingSecret` | 必填 | MinIO 与 Chart 内所有 S3 消费端共同引用的预创建 Secret；Chart 不渲染其凭据值 | `astron-agent-minio-credentials` |
+| `minio.auth.rootUserKey` | 必填 | Secret 中保存 MinIO/S3 访问密钥的键名 | `root-user` |
+| `minio.auth.rootPasswordKey` | 必填 | Secret 中保存 MinIO/S3 密钥的键名 | `root-password` |
+| `minio.auth.existingSecretChecksum` | 可选 | 非敏感轮换标记；原地轮换 Secret 后修改该值，使全部消费端同步滚动 | （留空） |
+| `minio.service.type` | 使用默认 | 内置 MinIO API Service 类型；对外暴露必须显式启用 | `ClusterIP` |
+| `minio.consoleService.type` | 使用默认 | 独立的 MinIO 控制台 Service 类型；开放 API 不会连带开放控制台 | `ClusterIP` |
+| `minio.publicEndpoint` | 条件必填 | 预签名/下载 URL 使用的客户端精确 origin（协议、主机、可选端口；禁止路径/查询/片段）；同时作为 `SKILL_RESOURCE_TRUSTED_ORIGIN` 注入 Core Agent；配置该值不会创建 Ingress 或暴露 Service | （留空，使用集群内端点） |
+| `minio.external.endpoint` | 条件必填 | `minio.enabled=false` 且有服务使用对象存储时必填的集群内 S3 兼容端点 | `https://s3.internal.example.com` |
+| `minio.external.publicEndpoint` | 可选 | 外部 S3 兼容服务面向客户端的端点 | `https://objects.example.com` |
 
 ---
 
@@ -206,8 +236,10 @@
 | RUN_MCP_PLUGIN_URL | 必填 | url | 运行 MCP 插件的接口地址 | http://core-link:18888/api/v1/mcp/call_tool |
 | APP_AUTH_HOST | 必填 | string | 应用认证服务主机地址(默认从 CORE_TENANT_PORT 获取端口) | core-tenant:${CORE_TENANT_PORT:-5052} |
 | APP_AUTH_PROT | 必填 | string | 应用认证服务协议(http/https) | http |
-| APP_AUTH_API_KEY | 必填 | string | 应用认证 API Key | 7b709739e8da44536127a333c7603a83 |
-| APP_AUTH_SECRET | 必填 | string | 应用认证 Secret | NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy |
+| APP_AUTH_API_KEY | 自动派生 | secret | 从自动生成的租户 bootstrap 凭据加载的应用认证 API Key | 自动生成并持久化 |
+| APP_AUTH_SECRET | 自动派生 | secret | 从自动生成的租户 bootstrap 凭据加载的应用认证 Secret | 自动生成并持久化 |
+| SKILL_RESOURCE_TRUSTED_ORIGIN | 自动派生 | URL origin | Core Agent 仅允许从该远程 origin 获取 Skill 资源；Compose 从 `OSS_REMOTE_ENDPOINT` 派生，Helm 从 `minio.publicEndpoint`/最终生效的 MinIO 公共端点派生，其他 URL origin 默认均不受信任 | http://minio.localhost:${EXPOSE_MINIO_PORT} |
+| SKILL_RESOURCE_TRUSTED_BUCKET | 自动派生 | string | Core Agent 仅接受该存储桶中的远程 Skill 资源；Compose/Helm 从 `OSS_BUCKET_CONSOLE`/`consoleHub.env.ossBucketConsole` 派生，并进一步限制对象键必须位于 `skill-files/` 且包含完整 SigV4 参数 | console-oss |
 
 ---
 
@@ -236,6 +268,20 @@
 | WORKFLOW_MYSQL_DB | 必填 | string | Workflow 模块使用的 MySQL 数据库名称 | workflow |
 | WORKFLOW_KAFKA_TOPIC | 必填 | string | Workflow 使用的 Kafka 主题名称 | spark-agent-builder |
 | RUNTIME_ENV | 必填 | string | 运行环境(dev/test/prod) | dev |
+| CODE_EXEC_TYPE | 使用默认值 | string | 代码节点隔离执行器。默认启用内置 LangChain/Pyodide 沙箱，无需外部服务或凭据；工作流启用 E2B 后优先使用 E2B；iFly、iFly-v2 为可选远程执行器。显式设为 `disabled` 可禁用代码节点，`local` 永不支持。 | langchain |
+| CODE_EXEC_TIMEOUT_SEC | 使用默认值 | int | 内置沙箱单次执行最长时间（限制为 1-600 秒） | 10 |
+| CODE_EXEC_MEMORY_LIMIT_MB | 使用默认值 | int | 内置 Pyodide V8 堆内存上限（限制为 128-2048 MB） | 256 |
+| WORKFLOW_INTERNAL_API_KEY | 自动生成 | secret | 用于可信内部调用访问 Workflow 特权接口；Compose 与 Helm 会自动生成并持久化，显式覆盖值需为 32-128 个安全字符 | 自动生成并持久化 |
+
+默认 `langchain` 执行器通过固定版本 Deno 启动官方 Pyodide WebAssembly
+沙箱，并关闭环境变量、宿主机文件、网络、子进程和 FFI 权限。E2B
+不是必需配置；工作流启用 E2B 后才会优先使用 E2B。用户代码不会在
+`core-workflow` 进程内执行，`local` 执行器不再支持。
+
+升级提示：如果保留了旧版本自动生成的 `config.env`（其中
+`CODE_EXEC_TYPE=disabled` 且没有 `CODE_EXEC_MEMORY_LIMIT_MB`），Workflow
+会在启动时将这个历史默认值迁移为内置沙箱，因此无需手动修改配置。若要
+明确禁用代码节点，请在容器进程环境中设置 `CODE_EXEC_TYPE=disabled`。
 
 ---
 
@@ -245,7 +291,7 @@
 |--------|----------|------|----------|--------|
 | HOST_BASE_ADDRESS | 用户必填 | url | 主机基础地址 | http://localhost |
 | CONSOLE_DOMAIN | 必填 | url | Console 控制台域名地址(默认从 HOST_BASE_ADDRESS 和 EXPOSE_NGINX_PORT 组合) | ${HOST_BASE_ADDRESS}:${EXPOSE_NGINX_PORT} |
-| OSS_REMOTE_ENDPOINT | 必填 | url | 对象存储远程端点地址(默认从 HOST_BASE_ADDRESS 和 EXPOSE_MINIO_PORT 组合) | ${HOST_BASE_ADDRESS}:${EXPOSE_MINIO_PORT} |
+| OSS_REMOTE_ENDPOINT | 必填 | URL origin | Console 预签名 URL 与 Core Agent 信任校验使用的精确 origin；本地默认值可用相同签名 Host 从 Docker 宿主机和 Compose 容器访问，远程客户端必须改为单独保护的 TLS 端点 | http://minio.localhost:${EXPOSE_MINIO_PORT} |
 | OSS_BUCKET_CONSOLE | 必填 | string | Console 使用的对象存储桶名称 | console-oss |
 | OSS_PRESIGN_EXPIRY_SECONDS_CONSOLE | 必填 | int | Console 预签名 URL 过期时间(秒) | 600 |
 | REDIS_DATABASE_CONSOLE | 必填 | int | Console 使用的 Redis 数据库索引 | 1 |
@@ -260,8 +306,8 @@
 | WORKFLOW_DEBUG_URL | 必填 | url | 工作流调试接口地址(默认从 CORE_WORKFLOW_PORT 获取端口) | http://core-workflow:${CORE_WORKFLOW_PORT:-7880}/workflow/v1/debug/chat/completions |
 | WORKFLOW_RESUME_URL | 必填 | url | 工作流恢复接口地址(默认从 CORE_WORKFLOW_PORT 获取端口) | http://core-workflow:${CORE_WORKFLOW_PORT:-7880}/workflow/v1/resume |
 | TENANT_ID | 必填 | string | 租户 ID | 680ab54f |
-| TENANT_KEY | 必填 | string | 租户 API Key | 7b709739e8da44536127a333c7603a83 |
-| TENANT_SECRET | 必填 | string | 租户 Secret | NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy |
+| TENANT_KEY | 自动生成 | secret | Compose 或 Helm 自动生成并持久化的租户 API Key；正常启动时保持留空 | 自动生成并持久化 |
+| TENANT_SECRET | 自动生成 | secret | Compose 或 Helm 自动生成并持久化的租户 Secret；正常启动时保持留空 | 自动生成并持久化 |
 | COMMON_APPID | 必填 | string | 通用应用 ID(默认从 TENANT_ID 获取) | ${TENANT_ID} |
 | COMMON_APIKEY | 必填 | string | 通用 API Key(默认从 TENANT_KEY 获取) | ${TENANT_KEY} |
 | COMMON_API_SECRET | 必填 | string | 通用 API Secret(默认从 TENANT_SECRET 获取) | ${TENANT_SECRET} |

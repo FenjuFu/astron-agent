@@ -8,18 +8,23 @@ to the workflow system with proper validation and storage handling.
 import uuid
 from typing import Annotated, List
 
-from fastapi import APIRouter, File, Header, UploadFile
+from fastapi import APIRouter, Depends, File, Header, UploadFile
 from fastapi.responses import JSONResponse
 
 from workflow.domain.entities.response import Resp
 from workflow.exception.e import CustomException
 from workflow.exception.errors.err_code import CodeEnum
+from workflow.extensions.fastapi.middleware.auth import (
+    require_workflow_internal_api_key,
+)
 from workflow.extensions.middleware.getters import get_oss_service
 from workflow.extensions.otlp.metric.meter import Meter
 from workflow.extensions.otlp.trace.span import Span
 from workflow.service import file_service
 
-router = APIRouter(tags=["SSE_OPENAPI"])
+router = APIRouter(
+    tags=["SSE_OPENAPI"], dependencies=[Depends(require_workflow_internal_api_key)]
+)
 
 
 @router.post("/upload_file")

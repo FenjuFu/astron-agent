@@ -15,7 +15,7 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y locales tzdata && \
+    apt-get install -y --no-install-recommends curl locales tzdata && \
     locale-gen zh_CN.UTF-8 && \
     ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone && \

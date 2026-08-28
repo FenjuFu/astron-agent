@@ -1,6 +1,7 @@
 """Test workflow_agent API endpoint"""
 
 import asyncio
+import json
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,8 +20,13 @@ from agent.api.schemas.workflow_agent_inputs import (
     CustomCompletionInstructionInputs,
     CustomCompletionModelConfigInputs,
     CustomCompletionPluginInputs,
+    CustomCompletionPluginSkillInputs,
 )
-from agent.api.v1.workflow_agent import CustomChatCompletion, custom_chat_completions
+from agent.api.v1.workflow_agent import (
+    CustomChatCompletion,
+    _serialize_workflow_agent_inputs,
+    custom_chat_completions,
+)
 
 
 @dataclass
@@ -86,6 +92,33 @@ class TestCustomChatCompletion:
             uid="test_uid",
             question="test question",
         )
+
+    def test_trace_payload_redacts_nested_sandbox_and_model_api_keys(
+        self, completion_inputs: CustomCompletionInputs
+    ) -> None:
+        sandbox_api_key = "LEGACY-SANDBOX-API-KEY-MUST-NOT-REACH-TRACE"
+        model_api_key = completion_inputs.model_config_inputs.api_key
+        completion_inputs.plugin.skills = [
+            CustomCompletionPluginSkillInputs(
+                skill_id="skill-1",
+                name="script-skill",
+                sandbox={
+                    "enabled": True,
+                    "apiKey": sandbox_api_key,
+                    "workflowId": "flow-1",
+                },
+            )
+        ]
+
+        serialized = _serialize_workflow_agent_inputs(completion_inputs)
+
+        assert sandbox_api_key not in serialized
+        assert model_api_key not in serialized
+        sanitized = json.loads(serialized)
+        assert sanitized["plugin"]["skills"][0]["sandbox"] == {
+            "enabled": True,
+            "workflowId": "flow-1",
+        }
 
     @pytest.mark.asyncio
     async def test_build_runner(

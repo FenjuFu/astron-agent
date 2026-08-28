@@ -5,7 +5,13 @@ server:
 
 spring:
   config:
-    import: optional:classpath:application-toolkit.yml
+    import:
+      - optional:classpath:application-toolkit.yml
+      # Compose generates these files once in persistent named volumes. They are
+      # optional for source development and Helm, which injects the same values
+      # through Kubernetes Secrets.
+      - optional:file:/app/secrets/workflow/workflow-internal.properties
+      - optional:file:/app/secrets/tenant/tenant-bootstrap.properties
   profiles:
     active: dev
   application:
@@ -117,11 +123,27 @@ mybatis-plus:
 s3:
   endpoint: ${OSS_ENDPOINT:http://minio:9000}
   remoteEndpoint: ${OSS_REMOTE_ENDPOINT:http://your-host-domain:9000}
-  accessKey: ${OSS_ACCESS_KEY_ID:astron-uploader}
-  secretKey: ${OSS_ACCESS_KEY_SECRET:astron-uploader-secret}
+  accessKey: ${OSS_ACCESS_KEY_ID:}
+  secretKey: ${OSS_ACCESS_KEY_SECRET:}
   bucket: ${OSS_BUCKET_CONSOLE:astron-agent}
   presignExpirySeconds: ${OSS_PRESIGN_EXPIRY_SECONDS_CONSOLE:600}
   enablePublicRead: true
+
+# Sandbox-produced artifacts use a separate private bucket and a dedicated service credential.
+# The application fails closed unless either the token or a persistent token file is configured.
+skill:
+  sandbox:
+    artifact-upload-token: ${SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN:}
+    artifact-upload-token-file: ${SKILL_SANDBOX_ARTIFACT_UPLOAD_TOKEN_FILE:}
+    artifact-bucket: ${SKILL_SANDBOX_ARTIFACT_BUCKET:workflow-artifacts}
+    artifact-max-file-size: ${SKILL_SANDBOX_ARTIFACT_MAX_FILE_SIZE:20MB}
+    artifact-max-active-files-per-workflow: ${SKILL_SANDBOX_ARTIFACT_MAX_ACTIVE_FILES_PER_WORKFLOW:1000}
+    artifact-max-active-total-size-per-workflow: ${SKILL_SANDBOX_ARTIFACT_MAX_ACTIVE_TOTAL_SIZE_PER_WORKFLOW:1GB}
+    artifact-download-expiry-seconds: ${SKILL_SANDBOX_ARTIFACT_DOWNLOAD_EXPIRY_SECONDS:300}
+    artifact-allowed-extensions: ${SKILL_SANDBOX_ARTIFACT_ALLOWED_EXTENSIONS:txt,md,csv,json,pdf,png,jpg,jpeg,gif,webp,doc,docx,xls,xlsx,ppt,pptx,zip}
+    runtime-credential:
+      token: ${SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN:}
+      token-file: ${SKILL_SANDBOX_RUNTIME_CREDENTIAL_TOKEN_FILE:}
 
 # Workflow configuration
 workflow:

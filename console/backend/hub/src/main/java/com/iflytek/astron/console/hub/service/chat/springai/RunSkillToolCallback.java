@@ -64,14 +64,26 @@ public class RunSkillToolCallback implements ToolCallback {
         body.put("stdin", args.get("stdin"));
         body.put("resources", skill.getJSONArray("resources"));
         body.put("sandbox", skill.getJSONObject("sandbox") == null ? new JSONObject() : skill.getJSONObject("sandbox"));
-        log.info("run_skill invoked, skillId={}, command={}", skillId, command);
+        log.info(
+                "run_skill invoked, skillId={}, commandBytes={}",
+                skillId,
+                command.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
         try {
-            return runtime.executeSandbox(body);
+            String result = runtime.executeSandbox(body);
+            log.info(
+                    "run_skill completed, skillId={}, status=success, responseBytes={}",
+                    skillId,
+                    result == null
+                            ? 0
+                            : result.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+            return result;
         } catch (Exception e) {
-            log.warn("run_skill failed, skillId={}, error={}", skillId, e.getMessage());
+            log.warn(
+                    "run_skill completed, skillId={}, status=failed, errorType={}",
+                    skillId,
+                    e.getClass().getSimpleName());
             return new JSONObject().fluentPut("skill_id", skillId)
                     .fluentPut("error", "run_failed")
-                    .fluentPut("message", e.getMessage())
                     .toJSONString();
         }
     }

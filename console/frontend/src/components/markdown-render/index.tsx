@@ -1,4 +1,4 @@
-import React, { ClassAttributes, StyleHTMLAttributes, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import ReactMarkdown, { ExtraProps } from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +8,10 @@ import { v4 as uuid } from 'uuid';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { github } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import customFootnotePlugin from './custom-footnote-plugin';
+import {
+  markdownKatexOptions,
+  markdownSanitizePlugin,
+} from '../markdown-sanitize';
 import 'katex/dist/katex.min.css';
 
 function index({
@@ -71,64 +75,22 @@ function index({
     }
   }, [content, isSending]);
 
-  const MyLink = (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+  const MyLink = ({
+    node,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> &
+    ExtraProps): React.ReactNode => (
     <a {...props} target="_blank" rel="noopener noreferrer">
       {props.children}
     </a>
   );
 
-  const ImageRenderer = (props: React.ImgHTMLAttributes<HTMLImageElement>) => {
+  const ImageRenderer = ({
+    node,
+    ...props
+  }: React.ImgHTMLAttributes<HTMLImageElement> &
+    ExtraProps): React.ReactNode => {
     return <img {...props} style={{ ...props.style, maxWidth: '100%' }} />;
-  };
-
-  // 作用域化样式函数
-  const scopeStyles = (styles: string, scopeClass: string): string => {
-    // 添加作用域类到每个样式规则
-    return styles.replace(
-      /([^{]+)\{([^}]*)\}/g,
-      (match, selectors, stylesBlock) => {
-        // 处理每个选择器：为每个选择器添加作用域类，但排除@开头的规则（如媒体查询）
-        if (selectors.trim().startsWith('@')) {
-          return match; // 媒体查询
-        }
-
-        const scopedSelectors = selectors
-          .split(',')
-          .map((selector: string) => {
-            const trimmed = selector.trim();
-            // 选择器是:root或html/body等，特殊处理
-            if (
-              trimmed === ':root' ||
-              trimmed === 'html' ||
-              trimmed === 'body'
-            ) {
-              return `[data-${globalMarkdownId}]`;
-            }
-            return `.${scopeClass} ${trimmed}`;
-          })
-          .join(', ');
-
-        return `${scopedSelectors} {${stylesBlock}}`;
-      }
-    );
-  };
-
-  const ScopedStyle = (
-    props: ClassAttributes<HTMLStyleElement> &
-      StyleHTMLAttributes<HTMLStyleElement> &
-      ExtraProps
-  ): React.ReactNode => {
-    const { children, node, ...rest } = props;
-    // 从style标签中获取样式内容
-    const styleContent = Array.isArray(children)
-      ? children.join('')
-      : typeof children === 'string'
-        ? children
-        : '';
-    // 添加作用域
-    const scopedStyles = scopeStyles(styleContent, 'markdown-body');
-
-    return <style {...rest}>{scopedStyles}</style>;
   };
 
   return (
@@ -140,7 +102,12 @@ function index({
         skipHtml={false}
         className="global-markdown"
         remarkPlugins={[remarkMath, [remarkGfm, { singleTilde: false }]]}
-        rehypePlugins={[rehypeRaw, rehypeKatex, customFootnotePlugin]}
+        rehypePlugins={[
+          rehypeRaw,
+          markdownSanitizePlugin,
+          [rehypeKatex, markdownKatexOptions],
+          customFootnotePlugin,
+        ]}
         components={{
           a: MyLink,
           img: ImageRenderer,
@@ -162,7 +129,6 @@ function index({
               </code>
             );
           },
-          style: ScopedStyle,
         }}
       >
         {content}

@@ -107,8 +107,5 @@ CREATE TABLE `workflow_node_history` (
 
 SET FOREIGN_KEY_CHECKS = 1;
 
-INSERT INTO `workflow`.`app` (`id`, `name`, `alias_id`, `api_key`, `api_secret`, `description`, `is_tenant`, `source`, `actual_source`, `plat_release_auth`, `status`, `audit_policy`, `create_by`, `update_by`, `create_at`, `update_at`)
-VALUES (1, '星辰', '680ab54f', '7b709739e8da44536127a333c7603a83', 'NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy', '星辰', 1, 1, 1, 1, 1, 0, 1, 1, '2025-09-20 14:10:48', '2025-09-20 14:10:51');
-
 INSERT INTO `workflow`.`app_source` (`id`, `source`, `source_id`, `description`, `create_at`, `update_at`)
 VALUES (1, 1, 'admin', '星辰', '2025-10-11 09:21:11', '2025-10-11 09:21:11');

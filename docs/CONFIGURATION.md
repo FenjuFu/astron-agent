@@ -17,6 +17,19 @@ Before deploying with Docker Compose, the following environment variables **must
 - **Host Address Configuration**:
   - `HOST_BASE_ADDRESS` - Set to your server address or domain name
 
+- **Deployment-internal authentication (no manual configuration)**:
+  - Docker Compose generates and persists `WORKFLOW_INTERNAL_API_KEY`,
+    `TENANT_KEY`, and `TENANT_SECRET` on first startup when their `.env` values
+    are empty. Helm generates and reuses the corresponding Secrets on live
+    installs and upgrades. Strong explicit overrides remain available, but are
+    not required for the normal startup path.
+
+- **Sandbox Internal Authentication**:
+  - Docker Compose generates and persists the artifact-upload and runtime tokens
+    when their `.env` values are empty. Helm does the same when both `token` and
+    `existingSecret` are empty; offline GitOps rendering should use pre-created
+    independent Secrets so their values remain stable between renders.
+
 **Business capability accounts configured after startup in Platform Account Management** (not written to `.env`):
 
 - **iFLYTEK Open Platform**: `PLATFORM_APP_ID`, `PLATFORM_API_KEY`, `PLATFORM_API_SECRET`, `SPARK_API_PASSWORD`, `SPARK_RTASR_API_KEY`
@@ -45,7 +58,12 @@ Configuration items in this document are marked as follows:
 >   - MySQL related: `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_URL`, etc.
 >   - Redis related: `REDIS_ADDR`, `REDIS_HOST`, `REDIS_PASSWORD`, `REDIS_PORT`, etc.
 >   - Kafka related: `KAFKA_SERVERS` and authentication information (if needed)
->   - MinIO related: `OSS_ENDPOINT`, `OSS_DOWNLOAD_HOST`, `OSS_ACCESS_KEY_ID`, `OSS_SECRET_KEY`, etc.
+>   - MinIO related: `OSS_ENDPOINT`, `OSS_DOWNLOAD_HOST`, `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, etc.
+>
+> **MinIO defaults**:
+> - To preserve one-command Docker Compose startup, the bundled MinIO uses `minioadmin`/`minioadmin123` by default and OSS clients derive their credentials from the same values. No manual credential entry is required. Replacing bundled MinIO with external object storage requires an explicit Compose override that replaces the bundled MinIO and its configuration check, then configures the external endpoint, access key, and secret key together.
+> - The bundled MinIO API and administrative console bind only to `127.0.0.1` on the host. Application containers use the configured API port over the private Compose network; `minio.localhost` gives local browsers and containers one identical signed hostname. Remote access must be an explicit decision through a separately protected TLS proxy; do not publish MinIO directly to an untrusted network.
+> - The Helm chart does not render MinIO credentials. Pre-create `minio.auth.existingSecret`; the bundled API and console Services default to separate `ClusterIP` Services. `NodePort`/`LoadBalancer` exposure is opt-in, and exposing the API never implicitly exposes the console.
 
 | Variable Name | Configuration Type | Type | Description | Example Value |
 |---------------|-------------------|------|-------------|---------------|
@@ -74,17 +92,31 @@ Configuration items in this document are marked as follows:
 | KAFKA_CLUSTER_ID | Use Default | string | Kafka cluster ID | MkU3OEVBNTcwNTJENDM2Qk |
 | KAFKA_TIMEOUT | Use Default | int | Kafka connection timeout (seconds) | 60 |
 | KAFKA_SERVERS | Use Default | string | Kafka server address list | kafka:29092 |
-| MINIO_ROOT_USER | Use Default | string | MinIO administrator username | minioadmin |
-| MINIO_ROOT_PASSWORD | Use Default | string | MinIO administrator password | minioadmin123 |
-| EXPOSE_MINIO_PORT | Use Default | int | MinIO API externally exposed port number | 18998 |
-| EXPOSE_MINIO_CONSOLE_PORT | Use Default | int | MinIO console externally exposed port number | 18999 |
+| MINIO_ROOT_USER | Use Default | string | Bundled MinIO administrator username; override when exposing MinIO externally | minioadmin |
+| MINIO_ROOT_PASSWORD | Use Default | string | Bundled MinIO administrator password; override when exposing MinIO externally | minioadmin123 |
+| EXPOSE_MINIO_PORT | Use Default | int | Host loopback-only MinIO API maintenance port (`127.0.0.1` binding is fixed by Compose) | 18998 |
+| EXPOSE_MINIO_CONSOLE_PORT | Use Default | int | Host loopback-only MinIO console maintenance port (`127.0.0.1` binding is fixed by Compose) | 18999 |
 | OSS_TYPE | Use Default | string | Object storage type (s3/oss/obs, etc.) | s3 |
-| OSS_ENDPOINT | Use Default | url | Object storage service endpoint address | http://minio:9000 |
-| OSS_ACCESS_KEY_ID | Use Default | string | Object storage access key ID | ${MINIO_ROOT_USER:-minioadmin} |
-| OSS_ACCESS_KEY_SECRET | Use Default | string | Object storage access key Secret | ${MINIO_ROOT_PASSWORD:-minioadmin123} |
+| OSS_ENDPOINT | Use Default | url | Object storage service endpoint address | http://minio:${EXPOSE_MINIO_PORT} |
+| OSS_ACCESS_KEY_ID | Use Default | string | Object-storage access key ID; bundled MinIO derives it from the administrator username | ${MINIO_ROOT_USER:-minioadmin} |
+| OSS_ACCESS_KEY_SECRET | Use Default | string | Object-storage access key secret; bundled MinIO derives it from the administrator password | ${MINIO_ROOT_PASSWORD:-minioadmin123} |
 | OSS_BUCKET_NAME | Use Default | string | Object storage bucket name | workflow |
 | OSS_TTL | Use Default | int | Object storage URL validity period (seconds) | 157788000 |
-| OSS_DOWNLOAD_HOST | Use Default | url | Object storage download access address | http://minio:9000 |
+| OSS_DOWNLOAD_HOST | Use Default | url | Endpoint embedded in download URLs; `minio.localhost` resolves to host loopback for local browsers and to MinIO's private-network alias for containers, preserving the signed Host | http://minio.localhost:${EXPOSE_MINIO_PORT} |
+
+### Helm MinIO Security Settings
+
+| Value | Configuration Type | Description | Default / Example |
+|-------|--------------------|-------------|-------------------|
+| `minio.auth.existingSecret` | Required | Pre-created Secret shared by MinIO and all in-chart S3 consumers; the chart never renders its credential values | `astron-agent-minio-credentials` |
+| `minio.auth.rootUserKey` | Required | Secret key containing the MinIO/S3 access key | `root-user` |
+| `minio.auth.rootPasswordKey` | Required | Secret key containing the MinIO/S3 secret key | `root-password` |
+| `minio.auth.existingSecretChecksum` | Optional | Non-secret rotation marker; update it to roll all consumers after rotating the Secret in place | (empty) |
+| `minio.service.type` | Use Default | Bundled MinIO API Service type; external exposure is explicit opt-in | `ClusterIP` |
+| `minio.consoleService.type` | Use Default | Separate MinIO console Service type; it is never exposed merely because the API is exposed | `ClusterIP` |
+| `minio.publicEndpoint` | Conditional | Exact client-facing origin (scheme, host, optional port; no path/query/fragment) for presigned/download URLs; also injected into Core Agent as `SKILL_RESOURCE_TRUSTED_ORIGIN`; configuring it does not create an Ingress or expose a Service | (empty; internal endpoint) |
+| `minio.external.endpoint` | Conditional | Internal S3-compatible endpoint required when `minio.enabled=false` and an enabled service uses object storage | `https://s3.internal.example.com` |
+| `minio.external.publicEndpoint` | Optional | Client-facing endpoint for an external S3-compatible service | `https://objects.example.com` |
 
 ---
 
@@ -206,8 +238,10 @@ See the [Langfuse observability guide](/guide/observability) for privacy behavio
 | RUN_MCP_PLUGIN_URL | Required | url | API address to run MCP plugin | http://core-link:18888/api/v1/mcp/call_tool |
 | APP_AUTH_HOST | Required | string | Application authentication service host address (port defaults from CORE_TENANT_PORT) | core-tenant:${CORE_TENANT_PORT:-5052} |
 | APP_AUTH_PROT | Required | string | Application authentication service protocol (http/https) | http |
-| APP_AUTH_API_KEY | Required | string | Application authentication API Key | 7b709739e8da44536127a333c7603a83 |
-| APP_AUTH_SECRET | Required | string | Application authentication Secret | NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy |
+| APP_AUTH_API_KEY | Derived | secret | Application authentication API Key, loaded from the generated tenant bootstrap credential | generated and persisted |
+| APP_AUTH_SECRET | Derived | secret | Application authentication Secret, loaded from the generated tenant bootstrap credential | generated and persisted |
+| SKILL_RESOURCE_TRUSTED_ORIGIN | Derived | url origin | Only remote origin from which Core Agent may fetch Skill resources; Compose derives it from `OSS_REMOTE_ENDPOINT`, Helm from `minio.publicEndpoint`/the effective MinIO public endpoint; no other URL origin is trusted | http://minio.localhost:${EXPOSE_MINIO_PORT} |
+| SKILL_RESOURCE_TRUSTED_BUCKET | Derived | string | Only bucket accepted for remote Skill resources; Compose/Helm derive it from `OSS_BUCKET_CONSOLE`/`consoleHub.env.ossBucketConsole`, and Core Agent additionally restricts keys to `skill-files/` with complete SigV4 parameters | console-oss |
 
 ---
 
@@ -236,6 +270,21 @@ See the [Langfuse observability guide](/guide/observability) for privacy behavio
 | WORKFLOW_MYSQL_DB | Required | string | MySQL database name used by Workflow module | workflow |
 | WORKFLOW_KAFKA_TOPIC | Required | string | Kafka topic name used by Workflow | spark-agent-builder |
 | RUNTIME_ENV | Required | string | Runtime environment (dev/test/prod) | dev |
+| CODE_EXEC_TYPE | Use Default | string | Isolated code executor. The built-in LangChain/Pyodide sandbox is enabled by default and needs no external credentials. E2B is optional and takes priority when enabled for a workflow; iFly and iFly-v2 remain optional remote executors. `disabled` explicitly disables code nodes and `local` is rejected. | langchain |
+| CODE_EXEC_TIMEOUT_SEC | Use Default | int | Maximum built-in sandbox execution time in seconds (bounded to 1-600) | 10 |
+| CODE_EXEC_MEMORY_LIMIT_MB | Use Default | int | Maximum built-in Pyodide V8 heap in megabytes (bounded to 128-2048) | 256 |
+| WORKFLOW_INTERNAL_API_KEY | Auto-generated | secret | Authenticates trusted internal calls to privileged Workflow APIs. Compose and Helm generate and persist it; an optional explicit override must contain 32-128 safe characters. | generated and persisted |
+
+The default `langchain` executor runs Python in the official Pyodide WebAssembly
+sandbox through a pinned Deno runtime. It has no environment, host-file,
+network, subprocess, or FFI permissions. E2B is optional; enabling it for a
+workflow makes that workflow use E2B first. Running user-provided code inside
+the core-workflow process (`local`) is not supported.
+
+Upgrade note: an untouched config generated by older releases (`CODE_EXEC_TYPE=disabled`
+without `CODE_EXEC_MEMORY_LIMIT_MB`) is migrated to the built-in sandbox at startup, so
+no manual configuration change is required. To explicitly disable Code nodes, set
+`CODE_EXEC_TYPE=disabled` in the container process environment.
 
 ---
 
@@ -245,7 +294,7 @@ See the [Langfuse observability guide](/guide/observability) for privacy behavio
 |---------------|-------------------|------|-------------|---------------|
 | HOST_BASE_ADDRESS | User Required | url | Host base address | http://localhost |
 | CONSOLE_DOMAIN | Required | url | Console domain address (defaults from HOST_BASE_ADDRESS and EXPOSE_NGINX_PORT) | ${HOST_BASE_ADDRESS}:${EXPOSE_NGINX_PORT} |
-| OSS_REMOTE_ENDPOINT | Required | url | Object storage remote endpoint address (defaults from HOST_BASE_ADDRESS and EXPOSE_MINIO_PORT) | ${HOST_BASE_ADDRESS}:${EXPOSE_MINIO_PORT} |
+| OSS_REMOTE_ENDPOINT | Required | url origin | Exact origin embedded in Console presigned URLs and trusted by Core Agent; the local default is reachable with the same signed Host from both the Docker host and Compose containers; remote clients require a separately protected TLS endpoint | http://minio.localhost:${EXPOSE_MINIO_PORT} |
 | OSS_BUCKET_CONSOLE | Required | string | Object storage bucket name used by Console | console-oss |
 | OSS_PRESIGN_EXPIRY_SECONDS_CONSOLE | Required | int | Console presigned URL expiration time (seconds) | 600 |
 | REDIS_DATABASE_CONSOLE | Required | int | Redis database index used by Console | 1 |
@@ -260,8 +309,8 @@ See the [Langfuse observability guide](/guide/observability) for privacy behavio
 | WORKFLOW_DEBUG_URL | Required | url | Workflow debug API address (port defaults from CORE_WORKFLOW_PORT) | http://core-workflow:${CORE_WORKFLOW_PORT:-7880}/workflow/v1/debug/chat/completions |
 | WORKFLOW_RESUME_URL | Required | url | Workflow resume API address (port defaults from CORE_WORKFLOW_PORT) | http://core-workflow:${CORE_WORKFLOW_PORT:-7880}/workflow/v1/resume |
 | TENANT_ID | Required | string | Tenant ID | 680ab54f |
-| TENANT_KEY | Required | string | Tenant API Key | 7b709739e8da44536127a333c7603a83 |
-| TENANT_SECRET | Required | string | Tenant Secret | NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy |
+| TENANT_KEY | Auto-generated | secret | Tenant API Key generated and persisted by Compose or Helm; leave empty for normal startup | generated and persisted |
+| TENANT_SECRET | Auto-generated | secret | Tenant Secret generated and persisted by Compose or Helm; leave empty for normal startup | generated and persisted |
 | COMMON_APPID | Required | string | Common application ID (defaults from TENANT_ID) | ${TENANT_ID} |
 | COMMON_APIKEY | Required | string | Common API Key (defaults from TENANT_KEY) | ${TENANT_KEY} |
 | COMMON_API_SECRET | Required | string | Common API Secret (defaults from TENANT_SECRET) | ${TENANT_SECRET} |

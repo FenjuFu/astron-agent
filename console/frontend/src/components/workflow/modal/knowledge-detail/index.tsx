@@ -35,6 +35,7 @@ import { typeList } from '@/constants';
 import { useMemoizedFn } from 'ahooks';
 import { generateKnowledgeOutput } from '@/components/workflow/utils/reactflowUtils';
 import MarkdownRender from '@/components/markdown-render';
+import KnowledgeNameText from '@/components/knowledge-name-text';
 import {
   KnowledgeDetailProps,
   EditChunkProps,
@@ -324,11 +325,7 @@ const KnowledgeTable = ({
                 />
               </div>
             )}
-            <span
-              className="text-second font-medium ml-1.5 text-overflow max-w-[500px]"
-              title={name}
-              dangerouslySetInnerHTML={{ __html: name }}
-            ></span>
+            <KnowledgeNameText name={name} />
             {record.type === 'folder' && (
               <img
                 src={Icons.knowledgeDetail.rightarow}

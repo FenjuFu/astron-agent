@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	Success  int = 0
-	ParamErr int = 14001
-	SidErr   int = 14002
+	Success         int = 0
+	ParamErr        int = 14001
+	SidErr          int = 14002
+	UnauthorizedErr int = 14003
 )
 
 type HandlerErr struct {

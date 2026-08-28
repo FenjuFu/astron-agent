@@ -25,6 +25,12 @@ Namespace: {{ .Release.Namespace }}
    {{- range .Values.ingress.hosts }}
    https://{{ .host }}
    {{- end }}
+
+   SECURITY BOUNDARY:
+   Service-only Console APIs are routed by longer regex paths to a selectorless
+   deny Service before the generic /console-api route. No snippet annotation is
+   required. With a non-ingress-nginx controller, verify equivalent longest-path
+   ordering or set ingress.enabled=false and use an explicit public-path allowlist.
 {{- end }}
 
 {{- if .Values.consoleFrontend.enabled }}
@@ -39,23 +45,23 @@ Namespace: {{ .Release.Namespace }}
 {{- if .Values.minio.enabled }}
 
 3. MinIO Console:
-   {{- if eq .Values.minio.service.type "NodePort" }}
-   MinIO is exposed via NodePort:
-   - API Port: {{ .Values.minio.service.nodePort }}
-   - Console Port: {{ .Values.minio.service.consoleNodePort }}
-   {{- if .Values.global.hostBaseAddress }}
-   - MinIO Console: {{ .Values.global.hostBaseAddress }}:{{ .Values.minio.service.consoleNodePort }}
-   {{- end }}
-   {{- else }}
+   {{- if and .Values.minio.consoleService.enabled (eq .Values.minio.consoleService.type "NodePort") }}
+   The MinIO console was explicitly exposed via NodePort:
+   - Console Port: {{ .Values.minio.consoleService.nodePort }}
+   {{- else if .Values.minio.consoleService.enabled }}
    Access MinIO console using port-forward:
 
-   kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "astron-agent.fullname" . }}-minio {{ .Values.minio.service.consolePort }}:9001
-   echo "MinIO Console: http://localhost:{{ .Values.minio.service.consolePort }}"
+   kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "astron-agent.fullname" . }}-minio-console {{ .Values.minio.consoleService.port }}:{{ .Values.minio.consoleService.port }}
+   echo "MinIO Console: http://localhost:{{ .Values.minio.consoleService.port }}"
+   {{- else }}
+   The MinIO console Service is disabled. Port-forward the StatefulSet only for local maintenance:
+
+   kubectl port-forward --namespace {{ .Release.Namespace }} statefulset/{{ include "astron-agent.fullname" . }}-minio 9001:9001
    {{- end }}
 
-   Credentials:
-   - Username: {{ .Values.minio.auth.rootUser }}
-   - Password: {{ .Values.minio.auth.rootPassword }}
+   Credentials are stored in Secret {{ include "astron-agent.minioSecretName" . }}
+   (keys {{ include "astron-agent.minioSecretUserKey" . }} and {{ include "astron-agent.minioSecretPasswordKey" . }}).
+   Secret values are intentionally never printed by Helm.
 {{- end }}
 
 {{- if .Values.casdoor.enabled }}

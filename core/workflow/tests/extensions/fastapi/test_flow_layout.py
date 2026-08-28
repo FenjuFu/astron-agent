@@ -6,9 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 from sqlalchemy.exc import StatementError
 
-from workflow.api.v1.flow.layout import get_comparison, update
-from workflow.domain.entities.compare_flow import ReadComparisonVo
+from workflow.api.v1.flow.layout import get_comparison, save_comparisons, update
+from workflow.domain.entities.compare_flow import ReadComparisonVo, SaveComparisonVo
 from workflow.domain.entities.flow import FlowUpdate
+from workflow.domain.models.flow import Flow
 from workflow.exception.e import CustomException
 from workflow.exception.errors.err_code import CodeEnum
 
@@ -40,6 +41,41 @@ async def test_get_comparison_returns_only_exact_snapshot_data() -> None:
     assert payload["code"] == 0
     assert payload["data"] == snapshot.data
     lookup.assert_called_once_with("101", "cmp-1", session, span_context)
+
+
+async def test_save_comparison_persists_sanitized_protocol_copy() -> None:
+    source = Flow(id=101, group_id=101, name="flow", app_id="app-1")
+    comparison_input = SaveComparisonVo(
+        flow_id="101",
+        version="cmp-1",
+        data={
+            "apiKey": "valid-model-key",
+            "sandbox": {
+                "enabled": True,
+                "artifactUploadToken": "legacy-secret",
+            },
+        },
+    )
+    span_context = MagicMock()
+    span_context.__enter__.return_value = span_context
+    mock_span = Mock(sid="test-sid")
+    mock_span.start.return_value = span_context
+    session = MagicMock()
+
+    with (
+        patch("workflow.api.v1.flow.layout.Span", return_value=mock_span),
+        patch("workflow.api.v1.flow.layout.Meter", return_value=Mock()),
+        patch("workflow.api.v1.flow.layout.flow_service.get", return_value=source),
+    ):
+        response = save_comparisons(comparison_input, session)
+
+    assert json.loads(response.body)["code"] == 0
+    persisted = session.add.call_args.args[0]
+    assert persisted.data == {
+        "apiKey": "valid-model-key",
+        "sandbox": {"enabled": True},
+    }
+    assert comparison_input.data["sandbox"]["artifactUploadToken"] == "legacy-secret"
 
 
 async def test_update_returns_redacted_parameter_error_for_invalid_protocol() -> None:

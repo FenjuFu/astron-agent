@@ -8,6 +8,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 
+import java.nio.charset.StandardCharsets;
+
 /** Spring AI tool wrapping {@link CurrentTimeTool}. */
 @Slf4j
 public class CurrentTimeToolCallback implements ToolCallback {
@@ -35,10 +37,15 @@ public class CurrentTimeToolCallback implements ToolCallback {
                     timezone = args.getString("timezone");
                 }
             } catch (Exception e) {
-                log.warn("Failed to parse current_time tool input as JSON: {}", toolInput);
+                log.warn(
+                        "Failed to parse current_time tool input as JSON, inputBytes={}, errorType={}",
+                        toolInput.getBytes(StandardCharsets.UTF_8).length,
+                        e.getClass().getSimpleName());
             }
         }
-        log.info("current_time tool invoked, timezone={}", timezone);
+        log.info(
+                "current_time tool invoked, timezoneBytes={}",
+                timezone == null ? 0 : timezone.getBytes(StandardCharsets.UTF_8).length);
         return CurrentTimeTool.execute(timezone);
     }
 }

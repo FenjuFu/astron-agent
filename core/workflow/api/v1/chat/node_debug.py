@@ -8,7 +8,7 @@ including code execution and node-specific debugging functionality.
 import json
 from typing import Any, Dict
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from starlette.responses import JSONResponse
 
 from workflow.domain.entities.node_debug_vo import CodeRunVo, NodeDebugVo
@@ -17,11 +17,18 @@ from workflow.engine.entities.workflow_dsl import WorkflowDSL
 from workflow.engine.nodes.code.code_node import CodeNode
 from workflow.exception.e import CustomException
 from workflow.exception.errors.err_code import CodeEnum
+from workflow.extensions.fastapi.middleware.auth import (
+    require_workflow_internal_api_key,
+)
 from workflow.extensions.otlp.metric.meter import Meter
 from workflow.extensions.otlp.trace.span import Span
 from workflow.service import flow_service
+from workflow.utils.trace_sanitization import serialize_trace_payload
 
-router = APIRouter(tags=["code_debug"])
+router = APIRouter(
+    tags=["code_debug"],
+    dependencies=[Depends(require_workflow_internal_api_key)],
+)
 
 
 @router.post("/run", status_code=200)  # Legacy interface compatibility
@@ -36,7 +43,7 @@ async def run_code(code_run_vo: CodeRunVo) -> JSONResponse:
     span = Span()
     with span.start(attributes={"flow_id": code_run_vo.flow_id}) as span_context:
         await span.add_info_events_async(
-            {"inputs": json.dumps(code_run_vo.dict(), ensure_ascii=False)}
+            {"inputs": serialize_trace_payload(code_run_vo.dict())}
         )
         var_dict = {}
 

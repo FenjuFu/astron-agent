@@ -16,6 +16,7 @@ import com.iflytek.astron.console.commons.entity.bot.UserLangChainInfo;
 import com.iflytek.astron.console.commons.enums.bot.BotUploadEnum;
 import com.iflytek.astron.console.commons.exception.BusinessException;
 import com.iflytek.astron.console.commons.mapper.bot.ChatBotBaseMapper;
+import com.iflytek.astron.console.commons.security.WorkflowInternalApiKey;
 import com.iflytek.astron.console.commons.service.bot.ChatBotTagService;
 import com.iflytek.astron.console.commons.service.data.UserLangChainDataService;
 import com.iflytek.astron.console.commons.service.workflow.impl.WorkflowBotParamServiceImpl;
@@ -33,6 +34,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -77,6 +79,9 @@ public class MaasUtil {
 
     @Value("${maas.authApi}")
     private String authApi;
+
+    @Value("${workflow.internal-api-key:}")
+    private String workflowInternalApiKey;
 
     @Value("${maas.mcpHost}")
     private String mcpHost;
@@ -204,11 +209,15 @@ public class MaasUtil {
             // If it's newly created, then it's empty, use POST request
             httpMethod = "POST";
         }
-        log.info("----- maas synchronization request body: {}", JSONObject.toJSONString(param));
+        String requestJson = JSONObject.toJSONString(param);
+        log.info(
+                "MaaS workflow synchronization request prepared, method={}, bodyBytes={}",
+                httpMethod,
+                requestJson.getBytes(StandardCharsets.UTF_8).length);
 
         // Build request body
         RequestBody requestBody = RequestBody.create(
-                JSONObject.toJSONString(param),
+                requestJson,
                 MediaType.parse("application/json; charset=utf-8"));
 
         // Build request
@@ -242,7 +251,9 @@ public class MaasUtil {
 
         JSONObject res = JSONObject.parseObject(response);
         if (res.getInteger("code") != 0) {
-            log.error("------ Synchronize maas workflow failed, reason: {}", res);
+            log.error(
+                    "MaaS workflow synchronization was rejected, code={}",
+                    res.getInteger("code"));
             return new JSONObject();
         }
         return res;
@@ -434,18 +445,25 @@ public class MaasUtil {
      * @return String representation of response content
      */
     private String executeRequest(String url, MaasApi bodyData) {
+        String serializedBody = JSONObject.toJSONString(bodyData);
         RequestBody requestBody = RequestBody.create(
-                JSONObject.toJSONString(bodyData),
+                serializedBody,
                 MediaType.parse("application/json; charset=utf-8"));
         Request request = new Request.Builder()
                 .url(url)
                 .post(requestBody)
                 .addHeader("X-Consumer-Username", consumerId)
+                .addHeader(
+                        WorkflowInternalApiKey.HEADER,
+                        WorkflowInternalApiKey.requireConfigured(workflowInternalApiKey))
                 .addHeader("Lang-Code", I18nUtil.getLanguage())
                 .addHeader("Authorization", "Bearer %s:%s".formatted(consumerKey, consumerSecret))
                 .addHeader(X_AUTH_SOURCE_HEADER, X_AUTH_SOURCE_VALUE)
                 .build();
-        log.info("MaasUtil executeRequest url: {} request: {}, header: {}, body: {}", request.url(), request, request.headers(), bodyData);
+        log.info(
+                "MaaS workflow API request, url={}, bodyBytes={}",
+                request.url(),
+                serializedBody.getBytes(StandardCharsets.UTF_8).length);
         try (Response httpResponse = HTTP_CLIENT.newCall(request).execute()) {
             ResponseBody responseBody = httpResponse.body();
             if (responseBody != null) {

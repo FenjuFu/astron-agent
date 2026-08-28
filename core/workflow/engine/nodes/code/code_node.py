@@ -5,6 +5,7 @@ from typing import Any, Dict, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from workflow.configs.app_config import DEFAULT_CODE_EXECUTOR_TYPE
 from workflow.engine.entities.variable_pool import VariablePool
 from workflow.engine.nodes.base_node import BaseNode
 from workflow.engine.nodes.code.executor.base_executor import CodeExecutorFactory
@@ -32,6 +33,14 @@ if output is not None:
 
     print(result)
 """
+
+ISOLATED_CODE_EXECUTOR_TYPES = frozenset({"ifly", "ifly-v2", "langchain"})
+ISOLATED_CODE_EXECUTOR_REQUIRED_ERROR = (
+    "No isolated code executor is configured. Enable the E2B sandbox, keep the "
+    f"built-in {DEFAULT_CODE_EXECUTOR_TYPE} executor enabled, or configure "
+    "CODE_EXEC_TYPE with another isolated executor. In-process local execution "
+    "is disabled."
+)
 
 
 class CodeNode(BaseNode):
@@ -109,6 +118,12 @@ class CodeNode(BaseNode):
                     code_result if isinstance(code_result, str) else str(code_result)
                 ),
             )
+        except CustomException as err:
+            # Preserve the executor's stable error code (for example, the
+            # timeout code) while keeping the detailed cause in internal
+            # tracing only.  The console maps these codes to controlled,
+            # localized messages before returning them to clients.
+            return self.fail(err, span)
         except Exception as err:
             return self.fail(
                 CustomException(CodeEnum.CODE_EXECUTION_ERROR, cause_error=err), span
@@ -132,9 +147,7 @@ class CodeNode(BaseNode):
 
         # Create appropriate code executor based on environment configuration
         sandbox_config = self._runtime_sandbox_config(span_context)
-        executor_type = (
-            "e2b" if sandbox_config else os.getenv("CODE_EXEC_TYPE", "local")
-        )
+        executor_type = self._resolve_executor_type(sandbox_config)
         code_executor = CodeExecutorFactory.create_executor(executor_type)
         # Execute code with timeout configuration
         result_str = await code_executor.execute(
@@ -160,13 +173,23 @@ class CodeNode(BaseNode):
                 self.output_identifier[0]: result_str,
             }
 
+    @staticmethod
+    def _resolve_executor_type(sandbox_config: dict[str, Any] | None) -> str:
+        if sandbox_config is not None:
+            return "e2b"
+
+        executor_type = (
+            os.getenv("CODE_EXEC_TYPE", DEFAULT_CODE_EXECUTOR_TYPE).strip().lower()
+        )
+        if executor_type not in ISOLATED_CODE_EXECUTOR_TYPES:
+            raise CustomException(
+                CodeEnum.CODE_EXECUTION_ERROR,
+                err_msg=ISOLATED_CODE_EXECUTOR_REQUIRED_ERROR,
+            )
+        return executor_type
+
     def _runtime_sandbox_config(self, span_context: Span) -> dict[str, Any] | None:
-        if (
-            self.sandbox is None
-            or not self.sandbox.enabled
-            or self.sandbox.provider != "e2b"
-            or not self.sandbox.api_key
-        ):
+        if self.sandbox is None or not self.sandbox.enabled:
             return None
         data = self.sandbox.model_dump()
         data["uid"] = data.get("uid") or self.uid
@@ -263,13 +286,13 @@ def _parser_code_parameter(python_code: str) -> list[str]:
     # Regex pattern to match function definitions with optional type hints
     re_pattern = r"def\s+(\w+)\s*\(([^)]*)\)\s*(?:->\s*[\w\[\],\s]*)?:"
     re_matches = re.findall(re_pattern, python_code, re.DOTALL)
-    re_parameter = ""
+    re_parameter: str | None = None
     # Find the main function specifically
     for re_match in re_matches:
         if re_match[0].strip() == "main":
             re_parameter = re_match[1].strip()
             break
-    if not re_parameter:
+    if re_parameter is None:
         raise CustomException(
             CodeEnum.CODE_BUILD_ERROR,
             err_msg="can not find main function",
@@ -290,13 +313,7 @@ def _parser_code_parameter(python_code: str) -> list[str]:
 class CodeSandboxConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    provider: str = "e2b"
     enabled: bool = False
-    api_key: str = Field(default="", alias="apiKey")
-    timeout_seconds: int = Field(default=60, alias="timeoutSeconds")
-    allow_internet_access: bool = Field(default=False, alias="allowInternetAccess")
-    artifact_upload_url: str = Field(default="", alias="artifactUploadUrl")
-    artifact_upload_token: str = Field(default="", alias="artifactUploadToken")
     workflow_id: str = Field(default="", alias="workflowId")
     run_id: str = Field(default="", alias="runId")
     node_id: str = Field(default="", alias="nodeId")

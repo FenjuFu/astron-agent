@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -59,8 +60,10 @@ public class AgentWorkflowRuntimeService {
             try {
                 definitions.add(buildDefinition(workflow, usedNames));
             } catch (Exception e) {
-                log.warn("Skip agent workflow, flowId: {}, error: {}",
-                        workflow == null ? null : workflow.getFlowId(), e.getMessage());
+                log.warn(
+                        "Skip agent workflow, flowId: {}, errorType: {}",
+                        workflow == null ? null : workflow.getFlowId(),
+                        e.getClass().getSimpleName());
             }
         }
         log.info("Resolved {} agent workflow(s) from {} requested id(s)", definitions.size(), ids.size());
@@ -122,7 +125,10 @@ public class AgentWorkflowRuntimeService {
                 }
             }
         } catch (Exception e) {
-            log.warn("Invalid workflows json, ignored: {}", workflowsJson);
+            log.warn(
+                    "Invalid workflows json, bodyBytes={}, errorType={}",
+                    workflowsJson.getBytes(StandardCharsets.UTF_8).length,
+                    e.getClass().getSimpleName());
             return List.of();
         }
         return flowIds.stream().distinct().toList();
@@ -144,8 +150,11 @@ public class AgentWorkflowRuntimeService {
             String responseBody = workflowChatRunClient.chat(body);
             return extractResult(definition, responseBody);
         } catch (Exception e) {
-            log.warn("Workflow run failed, flowId: {}, error: {}", definition.getFlowId(), e.getMessage());
-            return errorContent("WORKFLOW_CALL_FAILED", "Workflow call failed: " + e.getMessage());
+            log.warn(
+                    "Workflow run failed, flowId: {}, errorType: {}",
+                    definition.getFlowId(),
+                    e.getClass().getSimpleName());
+            return errorContent("WORKFLOW_CALL_FAILED", "Workflow call failed.");
         }
     }
 

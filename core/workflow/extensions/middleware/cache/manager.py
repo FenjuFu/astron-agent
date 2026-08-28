@@ -376,6 +376,23 @@ class RedisCache(BaseCacheService, Service):
         )
         return bool(result)
 
+    def distributed_lock(
+        self,
+        key: str,
+        *,
+        timeout: float,
+        blocking_timeout: float,
+        sleep: float,
+    ) -> Any:
+        """Use redis-py's tokenized Lua-release lock across replicas."""
+        return self._client.lock(
+            name=key,
+            timeout=timeout,
+            sleep=sleep,
+            blocking_timeout=blocking_timeout,
+            thread_local=False,
+        )
+
     def __repr__(self) -> str:
         """
         Return a string representation of the RedisCache instance.

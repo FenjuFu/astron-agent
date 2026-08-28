@@ -23,6 +23,11 @@ MYSQL_ERROR_ACCESS_DENIED = 1227
 MYSQL_ERROR_EXECUTE_DENIED = 1370
 MYSQL_ERROR_TABLE_EXISTS = 1050
 
+MIGRATION_LOCK_KEY = "workflow_database_migration_lock"
+MIGRATION_LOCK_TTL_SECONDS = 900.0
+MIGRATION_LOCK_WAIT_SECONDS = 930.0
+MIGRATION_LOCK_POLL_SECONDS = 0.25
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s:%(funcName)s:%(lineno)d | %(message)s",
@@ -49,31 +54,38 @@ def run_database_migration() -> None:
     config.set_main_option("script_location", str(alembic_dir))
 
     cache_service = get_cache_service()
-    is_locked = cache_service.setnx("workflow_database_migration_lock", "locked", ex=60)
-    if is_locked:
+    migration_lock = cache_service.distributed_lock(
+        MIGRATION_LOCK_KEY,
+        timeout=MIGRATION_LOCK_TTL_SECONDS,
+        blocking_timeout=MIGRATION_LOCK_WAIT_SECONDS,
+        sleep=MIGRATION_LOCK_POLL_SECONDS,
+    )
+    if not migration_lock.acquire():
+        raise TimeoutError("timed out waiting for Workflow database migration lock")
+    try:
         try:
             command.upgrade(config, "head")
-        except OperationalError as e:
-            db_error_code = getattr(e.orig, "args", [None])[0]
+        except OperationalError as error:
+            db_error_code = getattr(error.orig, "args", [None])[0]
             if db_error_code in (
                 MYSQL_ERROR_SELECT_DENIED,
                 MYSQL_ERROR_ACCESS_DENIED,
                 MYSQL_ERROR_EXECUTE_DENIED,
             ):
-                logging.warning(
-                    f"Skip database migration due to insufficient permissions: {e}"
+                logging.error(
+                    "Database migration permissions are insufficient; refusing to start"
                 )
-                return
-            elif db_error_code == MYSQL_ERROR_TABLE_EXISTS:
+                raise
+            if db_error_code == MYSQL_ERROR_TABLE_EXISTS:
                 logging.warning("Detected legacy database, stamping to init version...")
-                try:
-                    command.stamp(config, INIT_VERSION)
-                    command.upgrade(config, "head")
-                except Exception as stamp_error:
-                    logging.error(
-                        f"Failed to stamp and upgrade legacy database: {stamp_error}"
-                    )
-            else:
-                logging.error(f"Database migration failed: {e}")
-        except Exception as e:
-            logging.error(f"Database migration failed: {e}")
+                command.stamp(config, INIT_VERSION)
+                command.upgrade(config, "head")
+                return
+            logging.error("Database migration failed", exc_info=True)
+            raise
+    finally:
+        # All replicas run upgrade after acquiring the lock. Losers therefore wait
+        # for the winner instead of touching a partially migrated fresh schema.
+        # redis-py releases with an atomic token compare-and-delete. If this
+        # owner lost the lock, release raises rather than deleting a newer lock.
+        migration_lock.release()

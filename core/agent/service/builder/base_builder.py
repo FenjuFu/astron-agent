@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import ClassVar, Sequence, Union, cast
 
 import httpx
+from common.otlp.trace.langfuse import serialize_langfuse_value
 from common.otlp.trace.span import Span
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
@@ -143,7 +144,7 @@ class BaseApiBuilder(BaseModel):
                     "mcp-server-ids": mcp_server_ids,
                     "mcp-server-urls": mcp_server_urls,
                     "workflow-ids": workflow_ids,
-                    "skills": json.dumps(skills or [], ensure_ascii=False),
+                    "skills": serialize_langfuse_value(skills or []) or "[]",
                     "built-plugins": json.dumps(
                         [
                             f"{plugin.typ}\n{plugin.schema_template}"
@@ -310,7 +311,7 @@ class BaseApiBuilder(BaseModel):
                     "model": model_name,
                     "base_url": normalized_base_url,
                     "provider": normalized_provider or "openai",
-                    "api_key": sk,
+                    "model_auth_configured": bool(sk),
                     "app_id": app_id,
                 }
             )

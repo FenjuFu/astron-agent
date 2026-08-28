@@ -12,7 +12,7 @@ import com.iflytek.astron.console.commons.constant.ResponseEnum;
 import com.iflytek.astron.console.commons.enums.space.SpaceRoleEnum;
 import com.iflytek.astron.console.commons.exception.BusinessException;
 import com.iflytek.astron.console.commons.service.space.SpaceUserService;
-import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxConfigDto;
+import com.iflytek.astron.console.toolkit.entity.dto.skill.SkillSandboxRuntimeRefDto;
 import com.iflytek.astron.console.toolkit.entity.table.skill.SkillSandboxConfig;
 import com.iflytek.astron.console.toolkit.mapper.skill.SkillSandboxConfigMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,8 +38,6 @@ class SkillSandboxConfigServiceExplicitScopeTest {
     void setUp() {
         service = new SkillSandboxConfigService();
         ReflectionTestUtils.setField(service, "baseMapper", mapper);
-        ReflectionTestUtils.setField(service, "artifactUploadUrl", "http://hub/internal-upload");
-        ReflectionTestUtils.setField(service, "artifactUploadToken", "token");
         ReflectionTestUtils.setField(service, "spaceUserService", spaceUserService);
     }
 
@@ -56,11 +54,10 @@ class SkillSandboxConfigServiceExplicitScopeTest {
                 .thenReturn(SpaceRoleEnum.MEMBER);
         when(mapper.selectOne(any(), eq(false))).thenReturn(config);
 
-        SkillSandboxConfigDto dto = service.toRuntimeDto("current-member", 100L);
+        SkillSandboxRuntimeRefDto dto = service.toRuntimeRefDto("current-member", 100L);
 
         assertThat(dto.getEnabled()).isTrue();
-        assertThat(dto.getApiKey()).isEqualTo("team-secret");
-        assertThat(dto.getArtifactUploadUrl()).isEqualTo("http://hub/internal-upload");
+        assertThat(dto.getUid()).isEqualTo("current-member");
         assertThat(dto.getSpaceId()).isEqualTo(100L);
         verify(spaceUserService).getRole(100L, "current-member");
     }
@@ -70,7 +67,7 @@ class SkillSandboxConfigServiceExplicitScopeTest {
         RequestContextHolder.resetRequestAttributes();
         when(spaceUserService.getRole(100L, "former-member")).thenReturn(null);
 
-        assertThatThrownBy(() -> service.toRuntimeDto("former-member", 100L))
+        assertThatThrownBy(() -> service.toRuntimeRefDto("former-member", 100L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("responseEnum")
                 .isEqualTo(ResponseEnum.INSUFFICIENT_PERMISSIONS);
@@ -90,11 +87,10 @@ class SkillSandboxConfigServiceExplicitScopeTest {
         config.setDeleted(Boolean.FALSE);
         when(mapper.selectOne(any(), eq(false))).thenReturn(config);
 
-        SkillSandboxConfigDto dto = service.toRuntimeDto("approval-user", null);
+        SkillSandboxRuntimeRefDto dto = service.toRuntimeRefDto("approval-user", null);
 
         assertThat(dto.getEnabled()).isTrue();
-        assertThat(dto.getApiKey()).isEqualTo("approval-secret");
-        assertThat(dto.getArtifactUploadUrl()).isEqualTo("http://hub/internal-upload");
+        assertThat(dto.getUid()).isEqualTo("approval-user");
         assertThat(dto.getSpaceId()).isNull();
     }
 
@@ -102,7 +98,7 @@ class SkillSandboxConfigServiceExplicitScopeTest {
     void rejectsBlankExplicitPersonalUidWithoutRequestContext() {
         RequestContextHolder.resetRequestAttributes();
 
-        assertThatThrownBy(() -> service.toRuntimeDto(" ", null))
+        assertThatThrownBy(() -> service.toRuntimeRefDto(" ", null))
                 .isInstanceOf(BusinessException.class)
                 .extracting("responseEnum")
                 .isEqualTo(ResponseEnum.UNAUTHORIZED);

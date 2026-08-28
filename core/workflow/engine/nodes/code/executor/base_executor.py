@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from workflow.exception.e import CustomException
+from workflow.exception.errors.err_code import CodeEnum
 from workflow.extensions.otlp.trace.span import Span
 
 
@@ -42,17 +44,18 @@ class CodeExecutorFactory:
         """
         Create a code executor instance based on the specified type.
 
-        :param executor: Executor type identifier ("local", "langchain", "ifly", "ifly-v2", or "e2b")
+        :param executor: Executor type identifier ("langchain", "ifly", "ifly-v2", or "e2b")
         :return: Configured executor instance
         :raises Exception: If the specified executor type is not supported
         """
-        if executor == "local":
-            # Local execution using RestrictedPython for security
-            from workflow.engine.nodes.code.executor.local.local_executor import (
-                LocalExecutor,
+        if executor in {"", "disabled", "local"}:
+            raise CustomException(
+                err_code=CodeEnum.CODE_EXECUTION_ERROR,
+                err_msg=(
+                    "No isolated code executor is configured. "
+                    "The local executor is disabled for security."
+                ),
             )
-
-            return LocalExecutor()
         elif executor == "langchain":
             # Langchain sandbox execution environment
             from workflow.engine.nodes.code.executor.langchain.langchain_executor import (
@@ -78,4 +81,7 @@ class CodeExecutorFactory:
 
             return E2BExecutor()
         else:
-            raise Exception(f"Unsupported executor type: {executor}")
+            raise CustomException(
+                err_code=CodeEnum.CODE_EXECUTION_ERROR,
+                err_msg=f"Unsupported code executor type: {executor}",
+            )

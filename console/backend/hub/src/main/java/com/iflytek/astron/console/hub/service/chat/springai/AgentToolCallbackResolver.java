@@ -11,6 +11,7 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -74,7 +75,10 @@ public class AgentToolCallbackResolver {
                 }
             }
         } catch (Exception e) {
-            log.warn("Invalid bot tools json, ignored: {}", tools);
+            log.warn(
+                    "Invalid bot tools json, bodyBytes={}, errorType={}",
+                    tools.getBytes(StandardCharsets.UTF_8).length,
+                    e.getClass().getSimpleName());
             return List.of();
         }
         return toolIds.stream().distinct().toList();
@@ -99,7 +103,10 @@ public class AgentToolCallbackResolver {
                 }
             }
         } catch (Exception e) {
-            log.warn("Invalid bot workflows json, ignored: {}", workflows);
+            log.warn(
+                    "Invalid bot workflows json, bodyBytes={}, errorType={}",
+                    workflows.getBytes(StandardCharsets.UTF_8).length,
+                    e.getClass().getSimpleName());
             return List.of();
         }
         return flowIds.stream().distinct().toList();

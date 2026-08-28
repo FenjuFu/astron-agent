@@ -43,20 +43,6 @@ public class VersionController {
     }
 
     /**
-     * Query workflow versions by botId with pagination.
-     *
-     * @param page pagination information
-     * @param botId bot identifier
-     * @return paginated list of workflow versions
-     * @throws IllegalArgumentException if {@code botId} is blank
-     */
-    @GetMapping("/list-botId")
-    public Object list_botId(Page<WorkflowVersion> page,
-            @RequestParam String botId) {
-        return versionService.list_botId_Page(page, botId);
-    }
-
-    /**
      * Create a new workflow version.
      *
      * <p>
@@ -126,18 +112,6 @@ public class VersionController {
     @GetMapping("/get-max-version")
     public Object getMaxVersion(@RequestParam String botId) {
         return versionService.getMaxVersion(botId);
-    }
-
-    /**
-     * Get system data of a workflow version.
-     *
-     * @param createDto workflow version filter object
-     * @return system data of the version
-     * @throws IllegalArgumentException if version is not found
-     */
-    @PostMapping("/get-version-sys-data")
-    public Object getVersionSysData(@RequestBody WorkflowVersion createDto) {
-        return versionService.getVersionSysData(createDto);
     }
 
     /**

@@ -15,6 +15,8 @@ spec:
       app.kubernetes.io/component: minio
   template:
     metadata:
+      annotations:
+        checksum/object-storage-secret: {{ include "astron-agent.minioSecretChecksum" . | quote }}
       labels:
         {{- include "astron-agent.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: minio
@@ -23,6 +25,37 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+      - name: validate-object-storage-credentials
+        image: busybox:1.35
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "astron-agent.minioSecretName" . }}
+              key: {{ include "astron-agent.minioSecretUserKey" . }}
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "astron-agent.minioSecretName" . }}
+              key: {{ include "astron-agent.minioSecretPasswordKey" . }}
+        command:
+        - /bin/sh
+        - -ec
+        - |
+          reject_credential() {
+            echo "MinIO credentials are empty, weak, or use a known default." >&2
+            exit 1
+          }
+          user_lower="$(printf '%s' "${MINIO_ROOT_USER}" | tr '[:upper:]' '[:lower:]')"
+          password_lower="$(printf '%s' "${MINIO_ROOT_PASSWORD}" | tr '[:upper:]' '[:lower:]')"
+          [ "${#MINIO_ROOT_USER}" -ge 8 ] || reject_credential
+          [ "${#MINIO_ROOT_PASSWORD}" -ge 16 ] || reject_credential
+          [ "${MINIO_ROOT_USER}" != "${MINIO_ROOT_PASSWORD}" ] || reject_credential
+          case "${user_lower}" in minioadmin|admin|administrator|root|changeme|change_me*) reject_credential ;; esac
+          case "${password_lower}" in minioadmin|minioadmin123|admin|admin123|password|password123|changeme|change_me*) reject_credential ;; esac
+          echo "MinIO credential policy check passed."
       containers:
       - name: minio
         image: "{{ .Values.minio.image }}"
@@ -37,15 +70,15 @@ spec:
         - name: MINIO_ROOT_USER
           valueFrom:
             secretKeyRef:
-              name: {{ include "astron-agent.fullname" . }}-minio-secret
-              key: root-user
+              name: {{ include "astron-agent.minioSecretName" . }}
+              key: {{ include "astron-agent.minioSecretUserKey" . }}
         - name: MINIO_ROOT_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ include "astron-agent.fullname" . }}-minio-secret
-              key: root-password
+              name: {{ include "astron-agent.minioSecretName" . }}
+              key: {{ include "astron-agent.minioSecretPasswordKey" . }}
         - name: MINIO_SERVER_URL
-          value: {{ printf "%s:%d" .Values.global.hostBaseAddress (.Values.minio.service.nodePort | int) | quote }}
+          value: {{ include "astron-agent.minioPublicEndpoint" . | quote }}
         ports:
         - name: api
           containerPort: 9000

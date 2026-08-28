@@ -207,13 +207,23 @@ payloads regardless of this setting.
 3. Note the imported flow ID and the test application's ID.
 4. Send a synthetic request through the real debug route:
 
+The debug route is internal-only. For Docker Compose, load the automatically
+generated key from the running Workflow container into the current shell. For
+source or Helm deployments, load the same key from the configured environment
+or Secret instead; it does not need to be copied into `.env`.
+
 ```bash
 DEMO_FLOW_ID="<imported-flow-id>"
 DEMO_APP_ID="<test-application-id>"
+DEMO_WORKFLOW_INTERNAL_KEY="$(
+  docker compose exec -T core-workflow \
+    sh -c 'tr -d "\r\n" < "$WORKFLOW_INTERNAL_API_KEY_FILE"'
+)"
 
 curl --no-buffer \
   --header "Content-Type: application/json" \
   --header "x-consumer-username: ${DEMO_APP_ID}" \
+  --header "X-Workflow-Internal-Key: ${DEMO_WORKFLOW_INTERNAL_KEY}" \
   --data "{\"flow_id\":\"${DEMO_FLOW_ID}\",\"uid\":\"langfuse-demo-user\",\"chat_id\":\"langfuse-demo-1\",\"stream\":true,\"parameters\":{\"AGENT_USER_INPUT\":\"Synthetic request: summarize why tracing helps debugging.\"},\"ext\":{},\"history\":[]}" \
   http://127.0.0.1:7880/workflow/v1/debug/chat/completions
 ```

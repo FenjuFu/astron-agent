@@ -12,10 +12,11 @@ from common.otlp.trace.langfuse import (
     langfuse_observation_attributes,
     langfuse_trace_attributes,
     langfuse_trace_context,
+    serialize_langfuse_value,
 )
 from common.otlp.trace.span import Span
 from common.otlp.trace.trace import Trace
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header
 from opentelemetry.trace import Status, StatusCode
 from pydantic import ConfigDict
 from starlette.responses import StreamingResponse
@@ -23,13 +24,20 @@ from starlette.types import Receive, Scope, Send
 
 from agent.api.schemas.workflow_agent_inputs import CustomCompletionInputs
 from agent.api.v1.base_api import CompletionBase
+from agent.infra.workflow_internal_auth import require_workflow_internal_api_key
 from agent.service.builder.workflow_agent_builder import WorkflowAgentRunnerBuilder
 from agent.service.runner.workflow_agent_runner import WorkflowAgentRunner
 
-workflow_agent_router = APIRouter()
+workflow_agent_router = APIRouter(
+    dependencies=[Depends(require_workflow_internal_api_key)],
+)
 
 headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 _STREAM_END = object()
+
+
+def _serialize_workflow_agent_inputs(inputs: CustomCompletionInputs) -> str:
+    return serialize_langfuse_value(inputs.model_dump(by_alias=True)) or "{}"
 
 
 def _chunk_content(response: str) -> str:
@@ -146,7 +154,7 @@ class CustomChatCompletion(CompletionBase):
                 }
             )
             sp.add_info_events(
-                {"workflow-agent-inputs": self.inputs.model_dump_json(by_alias=True)}
+                {"workflow-agent-inputs": _serialize_workflow_agent_inputs(self.inputs)}
             )
             node_trace = await self.build_node_trace(bot_id=self.bot_id, span=sp)
             meter = await self.build_meter(sp)
