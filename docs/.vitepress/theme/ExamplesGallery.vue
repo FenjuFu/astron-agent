@@ -3,6 +3,19 @@ import { computed, ref } from "vue";
 import { useData } from "vitepress";
 import { data as examples } from "../examples.data";
 
+const previewAssets = import.meta.glob("../../../examples/*/preview.png", {
+  eager: true,
+  import: "default",
+  query: "?url"
+}) as Record<string, string>;
+
+const previewUrlsById = Object.fromEntries(
+  Object.entries(previewAssets).map(([path, url]) => {
+    const segments = path.split("/");
+    return [segments[segments.length - 2], url];
+  })
+);
+
 const REPO = "https://github.com/iflytek/astron-agent";
 const { lang } = useData();
 const isZh = computed(() => lang.value === "zh-CN");
@@ -38,6 +51,8 @@ const hideBrokenPreview = (id: string): void => {
   failedPreviews.value = new Set(failedPreviews.value).add(id);
 };
 
+const getPreviewUrl = (id: string): string => previewUrlsById[id] ?? "";
+
 const contributeHref = computed(() => (isZh.value ? "/zh/contribute-to-docs" : "/contribute-to-docs"));
 </script>
 
@@ -70,7 +85,7 @@ const contributeHref = computed(() => (isZh.value ? "/zh/contribute-to-docs" : "
         <img
           v-if="e.hasPreview && !failedPreviews.has(e.id)"
           class="exg__preview"
-          :src="e.previewUrl"
+          :src="getPreviewUrl(e.id)"
           :alt="`${e.title} workflow preview`"
           loading="lazy"
           @error="hideBrokenPreview(e.id)"
