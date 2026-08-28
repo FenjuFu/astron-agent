@@ -35,6 +35,9 @@ from workflow.engine.dsl_engine import WorkflowEngineFactory
 from workflow.engine.entities.workflow_dsl import WorkflowDSL
 from workflow.exception.e import CustomException
 from workflow.exception.errors.err_code import CodeEnum
+from workflow.extensions.fastapi.middleware.auth import (
+    require_workflow_internal_api_key,
+)
 from workflow.extensions.middleware.cache.base import BaseCacheService
 from workflow.extensions.middleware.getters import get_cache_service, get_session
 from workflow.extensions.otlp.metric.meter import Meter
@@ -45,7 +48,9 @@ from workflow.utils.protocol_sanitization import (
     sanitize_protocol_document_for_use,
 )
 
-router = APIRouter(tags=["Flows"])
+router = APIRouter(
+    tags=["Flows"], dependencies=[Depends(require_workflow_internal_api_key)]
+)
 
 
 def _protocol_validation_exception(error: ValidationError) -> CustomException:

@@ -642,11 +642,11 @@ async def test_code_node_falls_back_to_configured_executor_without_sandbox(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "executor_type",
-    [None, "", "disabled", "local", "e2b", "unsupported"],
+    ["", "disabled", "local", "e2b", "unsupported"],
 )
 async def test_code_node_without_sandbox_rejects_unsafe_executor(
     monkeypatch: pytest.MonkeyPatch,
-    executor_type: str | None,
+    executor_type: str,
 ) -> None:
     requested_types: list[str] = []
 
@@ -654,10 +654,7 @@ async def test_code_node_without_sandbox_rejects_unsafe_executor(
         requested_types.append(requested_type)
         return RecordingExecutor()
 
-    if executor_type is None:
-        monkeypatch.delenv("CODE_EXEC_TYPE", raising=False)
-    else:
-        monkeypatch.setenv("CODE_EXEC_TYPE", executor_type)
+    monkeypatch.setenv("CODE_EXEC_TYPE", executor_type)
     # These are mounted in the workflow service in production. The local executor
     # would inherit both the environment and the filesystem path.
     monkeypatch.setenv(
@@ -690,6 +687,34 @@ async def test_code_node_without_sandbox_rejects_unsafe_executor(
 
     assert ISOLATED_CODE_EXECUTOR_REQUIRED_ERROR in str(exc_info.value)
     assert requested_types == []
+
+
+@pytest.mark.asyncio
+async def test_code_node_without_sandbox_uses_builtin_executor_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = RecordingExecutor()
+    requested_types: list[str] = []
+
+    def fake_create_executor(requested_type: str) -> RecordingExecutor:
+        requested_types.append(requested_type)
+        return executor
+
+    monkeypatch.delenv("CODE_EXEC_TYPE", raising=False)
+    monkeypatch.setattr(CodeExecutorFactory, "create_executor", fake_create_executor)
+    node = CodeNode(
+        codeLanguage="python",
+        input_identifier=[],
+        output_identifier=["result"],
+        code="def main():\n    return {'result': 'ok'}",
+        appId="app-1",
+        uid="user-1",
+        node_id="ifly-code::node-1",
+    )
+
+    assert await node.execute_code({}, DummySpan()) == {"result": "ok"}
+    assert requested_types == ["langchain"]
+    assert executor.kwargs.get("sandbox") is None
 
 
 @pytest.mark.asyncio

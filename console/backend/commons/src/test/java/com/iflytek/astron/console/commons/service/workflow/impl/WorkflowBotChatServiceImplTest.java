@@ -100,6 +100,10 @@ class WorkflowBotChatServiceImplTest {
         ReflectionTestUtils.setField(workflowBotChatService, "appId", "testAppId");
         ReflectionTestUtils.setField(workflowBotChatService, "appKey", "testAppKey");
         ReflectionTestUtils.setField(workflowBotChatService, "appSecret", "testAppSecret");
+        ReflectionTestUtils.setField(
+                workflowBotChatService,
+                "workflowInternalApiKey",
+                "0123456789abcdef0123456789abcdef");
 
         // Set up test data
         sseId = "test-sse-id";

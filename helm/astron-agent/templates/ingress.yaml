@@ -70,7 +70,7 @@ metadata:
     nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
     nginx.ingress.kubernetes.io/auth-url: "http://{{ include "astron-agent.fullname" . }}-console-hub.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.consoleHub.service.port }}/internal/gateway/auth/workflow"
     nginx.ingress.kubernetes.io/auth-method: "GET"
-    nginx.ingress.kubernetes.io/auth-response-headers: "X-Consumer-Username"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-Consumer-Username,X-Workflow-Gateway-Timestamp,X-Workflow-Gateway-Signature"
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

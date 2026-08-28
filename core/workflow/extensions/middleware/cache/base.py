@@ -213,3 +213,14 @@ class BaseCacheService(abc.ABC):
         Returns:
             True if the key was set, False if the key already exists.
         """
+
+    def distributed_lock(
+        self,
+        key: str,
+        *,
+        timeout: float,
+        blocking_timeout: float,
+        sleep: float,
+    ) -> Any:
+        """Return an ownership-safe Redis distributed lock."""
+        raise NotImplementedError("distributed locks are not supported")

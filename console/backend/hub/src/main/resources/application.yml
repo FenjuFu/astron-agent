@@ -5,7 +5,13 @@ server:
 
 spring:
   config:
-    import: optional:classpath:application-toolkit.yml
+    import:
+      - optional:classpath:application-toolkit.yml
+      # Compose generates these files once in persistent named volumes. They are
+      # optional for source development and Helm, which injects the same values
+      # through Kubernetes Secrets.
+      - optional:file:/app/secrets/workflow/workflow-internal.properties
+      - optional:file:/app/secrets/tenant/tenant-bootstrap.properties
   profiles:
     active: dev
   application:

@@ -178,13 +178,22 @@ Observation 的 input 和 output 时，也必须显式开启该选项。无论�
 3. 记录导入后的 Flow ID 和测试应用 ID。
 4. 通过真实 debug 路由发送合成请求：
 
+debug 路由仅供内部调用。Docker Compose 部署可以从正在运行的 Workflow 容器
+读取自动生成的密钥到当前 shell；源码或 Helm 部署则从已配置的环境或 Secret
+读取同一个密钥，无需把它再复制到 `.env`。
+
 ```bash
 DEMO_FLOW_ID="<imported-flow-id>"
 DEMO_APP_ID="<test-application-id>"
+DEMO_WORKFLOW_INTERNAL_KEY="$(
+  docker compose exec -T core-workflow \
+    sh -c 'tr -d "\r\n" < "$WORKFLOW_INTERNAL_API_KEY_FILE"'
+)"
 
 curl --no-buffer \
   --header "Content-Type: application/json" \
   --header "x-consumer-username: ${DEMO_APP_ID}" \
+  --header "X-Workflow-Internal-Key: ${DEMO_WORKFLOW_INTERNAL_KEY}" \
   --data "{\"flow_id\":\"${DEMO_FLOW_ID}\",\"uid\":\"langfuse-demo-user\",\"chat_id\":\"langfuse-demo-1\",\"stream\":true,\"parameters\":{\"AGENT_USER_INPUT\":\"Synthetic request: summarize why tracing helps debugging.\"},\"ext\":{},\"history\":[]}" \
   http://127.0.0.1:7880/workflow/v1/debug/chat/completions
 ```

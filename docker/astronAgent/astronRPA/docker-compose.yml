@@ -50,13 +50,8 @@ services:
     healthcheck:
       test:
         [
-          'CMD',
-          'mysqladmin',
-          'ping',
-          '-h',
-          'localhost',
-          '-u${DATABASE_USERNAME}',
-          '-p${DATABASE_PASSWORD}',
+          'CMD-SHELL',
+          'mysqladmin ping -h localhost -u"$${DATABASE_USERNAME}" -p"$${DATABASE_PASSWORD}"',
         ]
       interval: 10s
       timeout: 5s

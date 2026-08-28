@@ -10,14 +10,17 @@
 {{- $langfusePublicKeyKey := default "public-key" (get $langfuseSecret "publicKeyKey") }}
 {{- $langfuseSecretKeyKey := default "secret-key" (get $langfuseSecret "secretKeyKey") }}
 {{- $langfuseTraceContextSecretKey := default "trace-context-secret" (get $langfuseSecret "traceContextSecretKey") }}
-{{- $workflowAuth := default (dict) $.Values.workflowInternalAuth }}
-{{- $workflowAuthExisting := default (dict) (get $workflowAuth "existingSecret") }}
-{{- $workflowAuthSecretName := default (printf "%s-workflow-internal-auth" (include "astron-agent.fullname" $)) (get $workflowAuthExisting "name") }}
-{{- $workflowAuthSecretKey := default "workflow-internal-api-key" (get $workflowAuthExisting "key") }}
+{{- $workflowAuthSecretName := include "astron-agent.workflowInternalAuthSecretName" $ }}
+{{- $workflowAuthSecretKey := include "astron-agent.workflowInternalAuthSecretKey" $ }}
+{{- $tenantBootstrapSecretName := include "astron-agent.tenantBootstrapSecretName" $ }}
+{{- $tenantBootstrapKeyKey := include "astron-agent.tenantBootstrapSecretKeyKey" $ }}
+{{- $tenantBootstrapSecretKey := include "astron-agent.tenantBootstrapSecretSecretKey" $ }}
 {{- range $serviceName := $services }}
 {{- $serviceConfig := index $.Values $serviceName }}
 {{- $usesObjectStorage := or (eq $serviceName "coreAitools") (eq $serviceName "coreWorkflow") }}
 {{- $usesInternalCredentials := and $.Values.consoleHub.enabled (or (eq $serviceName "coreAgent") (eq $serviceName "coreWorkflow")) }}
+{{- $usesWorkflowInternalAuth := or (eq $serviceName "coreAgent") (eq $serviceName "coreWorkflow") }}
+{{- $usesTenantBootstrap := or (eq $serviceName "coreTenant") (eq $serviceName "coreAgent") (eq $serviceName "coreWorkflow") }}
 {{- if $serviceConfig.enabled }}
 ---
 apiVersion: apps/v1
@@ -35,7 +38,7 @@ spec:
       app.kubernetes.io/component: {{ kebabcase $serviceName }}
   template:
     metadata:
-      {{- if or $usesObjectStorage $usesInternalCredentials }}
+      {{- if or $usesObjectStorage $usesInternalCredentials $usesWorkflowInternalAuth $usesTenantBootstrap }}
       annotations:
         {{- if $usesInternalCredentials }}
         checksum/artifact-upload-secret: {{ include "astron-agent.artifactUploadSecretChecksum" $ | quote }}
@@ -45,6 +48,14 @@ spec:
         {{- end }}
         {{- if $usesObjectStorage }}
         checksum/object-storage-secret: {{ include "astron-agent.minioSecretChecksum" $ | quote }}
+        {{- end }}
+        {{- if $usesWorkflowInternalAuth }}
+        checksum/workflow-internal-auth-secret: {{ include "astron-agent.workflowInternalAuthSecretChecksum" $ | quote }}
+        internal-secret-name/workflow-internal-auth: {{ $workflowAuthSecretName | quote }}
+        {{- end }}
+        {{- if $usesTenantBootstrap }}
+        checksum/tenant-bootstrap-secret: {{ include "astron-agent.tenantBootstrapSecretChecksum" $ | quote }}
+        internal-secret-name/tenant-bootstrap: {{ $tenantBootstrapSecretName | quote }}
         {{- end }}
       {{- end }}
       labels:
@@ -150,12 +161,56 @@ spec:
             secretKeyRef:
               name: {{ include "astron-agent.minioSecretName" $ }}
               key: {{ include "astron-agent.minioSecretPasswordKey" $ }}
+        {{- else if and $usesTenantBootstrap (has $key (list "tenantId" "tenantKey" "tenantSecret")) }}
+        {{/* Canonical values are injected from tenantBootstrap below. */}}
+        {{- else if and (eq $serviceName "coreAgent") (has $key (list "appAuthApiKey" "appAuthSecret")) }}
+        {{/* Canonical values are injected from tenantBootstrap below. */}}
+        {{- else if and (eq $serviceName "coreWorkflow") (has $key (list "appManagePlatKey" "appManagePlatSecret")) }}
+        {{/* Canonical values are injected from tenantBootstrap below. */}}
         {{- else }}
         - name: {{ upper (snakecase $key) }}
           value: {{ $value | quote }}
         {{- end }}
         {{- end }}
+        {{- if $usesTenantBootstrap }}
+        - name: TENANT_ID
+          value: {{ include "astron-agent.tenantBootstrapID" $ | quote }}
+        - name: TENANT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapKeyKey }}
+        - name: TENANT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapSecretKey }}
+        {{- end }}
+        {{- if eq $serviceName "coreAgent" }}
+        - name: APP_AUTH_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapKeyKey }}
+        - name: APP_AUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapSecretKey }}
+        {{- end }}
         {{- if eq $serviceName "coreWorkflow" }}
+        - name: APP_MANAGE_PLAT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapKeyKey }}
+        - name: APP_MANAGE_PLAT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tenantBootstrapSecretName }}
+              key: {{ $tenantBootstrapSecretKey }}
+        {{- end }}
+        {{- if or (eq $serviceName "coreAgent") (eq $serviceName "coreWorkflow") }}
         - name: WORKFLOW_INTERNAL_API_KEY
           valueFrom:
             secretKeyRef:

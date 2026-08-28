@@ -66,21 +66,12 @@ public class AppService {
         String appUrl = apiUrl.getAppUrl() + "/key/" + appId;
         String resp;
         try {
-            resp = HeaderAuthHttpTool.get(appUrl, apiUrl.getApiKey(), apiUrl.getApiSecret());
-            log.info("getAkSk, resp = {}", resp);
+            resp = HeaderAuthHttpTool.tenantGet(
+                    appUrl, apiUrl.getApiKey(), apiUrl.getApiSecret());
         } catch (NoSuchAlgorithmException | InvalidKeyException | IOException e) {
             throw new RuntimeException(e);
         }
-        Object data = CommonTool.checkSystemCallResponse(resp);
-        String errMsg = "Failed to query APPID credentials. Please check if APPID belongs to you or if APPID has been deleted, APPID=" + appId;
-        if (data == null) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, errMsg);
-        }
-        JSONArray array = JSON.parseArray(data.toString());
-        if (CollectionUtils.isEmpty(array)) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED, errMsg);
-        }
-        return array.getObject(0, AkSk.class);
+        return parseRemoteCredential(resp, appId, "cached");
     }
 
     /**
@@ -99,12 +90,16 @@ public class AppService {
         String appUrl = apiUrl.getAppUrl() + "/key/" + appId;
         String resp;
         try {
-            resp = HeaderAuthHttpTool.get(appUrl, apiUrl.getApiKey(), apiUrl.getApiSecret());
-            log.info("remoteCallAkSk, resp = {}", resp);
+            resp = HeaderAuthHttpTool.tenantGet(
+                    appUrl, apiUrl.getApiKey(), apiUrl.getApiSecret());
         } catch (NoSuchAlgorithmException | InvalidKeyException | IOException e) {
             throw new RuntimeException(e);
         }
-        Object data = CommonTool.checkSystemCallResponse(resp);
+        return parseRemoteCredential(resp, appId, "uncached");
+    }
+
+    private AkSk parseRemoteCredential(String response, String appId, String lookupMode) {
+        Object data = CommonTool.checkSystemCallResponse(response);
         String errMsg = "Failed to query APPID credentials. Please check if APPID belongs to you or if APPID has been deleted, APPID=" + appId;
         if (data == null) {
             throw new BusinessException(ResponseEnum.RESPONSE_FAILED, errMsg);
@@ -113,7 +108,13 @@ public class AppService {
         if (CollectionUtils.isEmpty(array)) {
             throw new BusinessException(ResponseEnum.RESPONSE_FAILED, errMsg);
         }
-        return array.getObject(0, AkSk.class);
+        AkSk credential = array.getObject(0, AkSk.class);
+        log.info(
+                "APP credential query succeeded, appId={}, mode={}, responseChars={}",
+                appId,
+                lookupMode,
+                response == null ? 0 : response.length());
+        return credential;
     }
 
     /**

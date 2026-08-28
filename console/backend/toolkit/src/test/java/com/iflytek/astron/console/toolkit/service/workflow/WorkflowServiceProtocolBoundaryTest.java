@@ -32,11 +32,16 @@ import static org.mockito.Mockito.mockStatic;
 
 class WorkflowServiceProtocolBoundaryTest {
 
+    private static final String INTERNAL_KEY =
+            "0123456789abcdef0123456789abcdef";
+
     private WorkflowService workflowService;
 
     @BeforeEach
     void setUp() {
         workflowService = new WorkflowService();
+        ReflectionTestUtils.setField(
+                workflowService, "workflowInternalApiKey", INTERNAL_KEY);
     }
 
     @Test
@@ -108,7 +113,10 @@ class WorkflowServiceProtocolBoundaryTest {
         appender.start();
         logger.addAppender(appender);
         try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
-            okHttp.when(() -> OkHttpUtil.post(anyString(), anyString()))
+            okHttp.when(() -> OkHttpUtil.post(
+                    anyString(),
+                    org.mockito.ArgumentMatchers.anyMap(),
+                    anyString()))
                     .thenReturn("{\"code\":0,\"message\":\""
                             + sentinel
                             + "\",\"data\":{\"flow_id\":\"flow-1\",\"echo\":\""

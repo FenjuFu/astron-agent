@@ -90,6 +90,9 @@ public class WorkflowBotChatServiceImpl implements WorkflowBotChatService {
     @Value("${common.apiSecret}")
     private String appSecret;
 
+    @Value("${workflow.internal-api-key:}")
+    private String workflowInternalApiKey;
+
     /**
      * Handle chatbot workflow requests
      *
@@ -187,7 +190,8 @@ public class WorkflowBotChatServiceImpl implements WorkflowBotChatService {
             body = RequestBody.create(JSON.toJSONString(build), MediaType.parse("application/json; charset=utf-8"));
             apiUsedUrl = resumeUrl;
         }
-        WorkflowClient client = new WorkflowClient(apiUsedUrl, appId, appKey, appSecret, body);
+        WorkflowClient client = new WorkflowClient(
+                apiUsedUrl, appId, appKey, appSecret, body, workflowInternalApiKey);
         WorkflowListener listener = new WorkflowListener(client, chatReqRecords, sseId, wssListenerService, isDebug, sseEmitter);
         client.createWebSocketConnect(listener);
     }

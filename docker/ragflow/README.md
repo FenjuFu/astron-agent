@@ -29,7 +29,7 @@ The [.env](./.env) file contains important environment variables for Docker.
 - `STACK_VERSION`  
   The version of Elasticsearch. Defaults to `8.11.3`
 - `ES_PORT`  
-  The port used to expose the Elasticsearch service to the host machine, allowing **external** access to the service running inside the Docker container.  Defaults to `1200`.
+  The host-loopback maintenance port for Elasticsearch. Defaults to `1200`. Containers use the private Compose network.
 - `ELASTIC_PASSWORD`  
   The password for Elasticsearch.
 
@@ -52,14 +52,14 @@ The [.env](./.env) file contains important environment variables for Docker.
 - `MYSQL_PASSWORD`  
   The password for MySQL.
 - `MYSQL_PORT`  
-  The port used to expose the MySQL service to the host machine, allowing **external** access to the MySQL database running inside the Docker container. Defaults to `5455`.
+  The host-loopback maintenance port for MySQL. Defaults to `5455`. Containers use the private Compose network.
 
 ### MinIO
 
 - `MINIO_CONSOLE_PORT`  
-  The port used to expose the MinIO console interface to the host machine, allowing **external** access to the web-based console running inside the Docker container. Defaults to `9001`
+  The host-loopback maintenance port for the MinIO console. Defaults to `9001`.
 - `MINIO_PORT`  
-  The port used to expose the MinIO API service to the host machine, allowing **external** access to the MinIO object storage service running inside the Docker container. Defaults to `9000`.
+  The host-loopback maintenance port for the MinIO API. Defaults to `9000`. Containers use the private Compose network.
 - `MINIO_USER`  
   The username for MinIO.
 - `MINIO_PASSWORD`  
@@ -68,7 +68,7 @@ The [.env](./.env) file contains important environment variables for Docker.
 ### Redis
 
 - `REDIS_PORT`  
-  The port used to expose the Redis service to the host machine, allowing **external** access to the Redis service running inside the Docker container. Defaults to `6379`.
+  The host-loopback maintenance port for Redis. Defaults to `6379`. Containers use the private Compose network.
 - `REDIS_PASSWORD`  
   The password for Redis.
 

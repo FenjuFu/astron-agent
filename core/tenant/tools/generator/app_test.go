@@ -1,6 +1,9 @@
 package generator
 
 import (
+	"bytes"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"regexp"
 	"testing"
@@ -217,9 +220,8 @@ func TestGenSecret(t *testing.T) {
 			t.Error("Generated secret should not be empty")
 		}
 
-		// Verify the result contains base64-like characters
-		// Since it's base64 encoded, it should contain A-Z, a-z, 0-9, +, /
-		matched, err := regexp.MatchString("^[A-Za-z0-9+/]+$", result)
+		// Raw URL-safe base64 is safe in HTTP credentials without escaping.
+		matched, err := regexp.MatchString("^[A-Za-z0-9_-]{32}$", result)
 		if err != nil {
 			t.Errorf("Regex error: %v", err)
 		}
@@ -245,6 +247,55 @@ func TestGenSecret(t *testing.T) {
 			t.Errorf("Expected %d unique secrets, got %d", iterations, len(secrets))
 		}
 	})
+}
+
+func TestCredentialGeneratorsUseSecureRandomReader(t *testing.T) {
+	originalReader := credentialRandomReader
+	defer func() {
+		credentialRandomReader = originalReader
+	}()
+
+	credentialRandomReader = bytes.NewReader([]byte{
+		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+		0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+	})
+	if key := GenKey("ignored-but-compatible"); key != "000102030405060708090a0b0c0d0e0f" {
+		t.Fatalf("GenKey() = %q, want crypto-reader bytes encoded as lowercase hex", key)
+	}
+
+	secretBytes := bytes.Repeat([]byte{0x01}, 24)
+	credentialRandomReader = bytes.NewReader(secretBytes)
+	if secret := GenSecret(); secret != base64.RawURLEncoding.EncodeToString(secretBytes) {
+		t.Fatalf("GenSecret() = %q, want crypto-reader bytes encoded as base64", secret)
+	}
+}
+
+type failingCredentialReader struct{}
+
+func (failingCredentialReader) Read([]byte) (int, error) {
+	return 0, errors.New("entropy unavailable")
+}
+
+func TestCredentialGeneratorsFailClosedWhenEntropyUnavailable(t *testing.T) {
+	for name, generate := range map[string]func(){
+		"key":    func() { _ = GenKey("test-app") },
+		"secret": func() { _ = GenSecret() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			originalReader := credentialRandomReader
+			defer func() {
+				credentialRandomReader = originalReader
+			}()
+			credentialRandomReader = failingCredentialReader{}
+
+			defer func() {
+				if recovered := recover(); recovered == nil {
+					t.Fatalf("Gen%s() did not fail closed when secure entropy was unavailable", name)
+				}
+			}()
+			generate()
+		})
+	}
 }
 
 func TestGenAppId(t *testing.T) {

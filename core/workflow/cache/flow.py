@@ -10,7 +10,7 @@ from workflow.extensions.middleware.getters import get_cache_service
 from workflow.utils.protocol_sanitization import sanitize_protocol_document_for_use
 
 # Redis key prefix for flow information
-REDIS_FLOW_INFO_HEAD = "workflow:flow_info:v2"
+REDIS_FLOW_INFO_HEAD = "workflow:flow_info:v3"
 
 
 def _sanitize_cached_flow(flow: Flow | None) -> Flow | None:

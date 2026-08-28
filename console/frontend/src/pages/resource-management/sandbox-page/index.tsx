@@ -189,7 +189,7 @@ function SandboxConfigModal({
           type="info"
           showIcon
           className="mb-5"
-          message="保存并启用后，Agent Skill 脚本和工作流代码节点将使用该沙箱配置执行；未启用时，系统会按当前默认执行策略处理。"
+          message="启用并配置 E2B 后，Agent Skill 脚本和工作流代码节点会优先使用 E2B 沙箱；关闭 E2B 时，工作流代码节点自动使用内置 LangChain/Pyodide 隔离执行器，无需额外配置。"
         />
         <Form.Item name="provider" hidden>
           <Input />
@@ -368,7 +368,7 @@ function SandboxPage(): React.ReactElement {
           type="info"
           showIcon
           className="mb-5"
-          message="未启用脚本沙箱时，Skill 脚本会返回环境未配置的提示；工作流代码节点将继续使用系统默认执行方式。启用并配置 E2B 后，两类脚本都会优先进入沙箱执行。"
+          message="关闭 E2B 时，工作流代码节点默认使用内置 LangChain/Pyodide 隔离执行器，无需额外配置；Agent Skill 脚本需要启用并配置 E2B。显式将 CODE_EXEC_TYPE 设为 disabled 时，代码节点会被禁用。"
         />
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">

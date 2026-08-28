@@ -31,6 +31,12 @@ func (m *verifyAuthAppDao) WithAppId(appId string) dao.SqlOption {
 	}
 }
 
+func (m *verifyAuthAppDao) WithIsDisable(isDisable bool) dao.SqlOption {
+	return func() (string, []interface{}) {
+		return "is_disable=?", []interface{}{isDisable}
+	}
+}
+
 func (m *verifyAuthAppDao) WithIsDelete(isDelete bool) dao.SqlOption {
 	return func() (string, []interface{}) {
 		return "is_delete=?", []interface{}{isDelete}
@@ -120,5 +126,32 @@ func TestAuthService_VerifyAppByAPIKeySecret_InvalidSecret(t *testing.T) {
 	}
 	if bizErr.Code() != ApiKeyNotExist {
 		t.Fatalf("Expected ApiKeyNotExist, got %d", bizErr.Code())
+	}
+}
+
+func TestAuthService_VerifyAppByAPIKeySecret_RejectsDisabledApp(t *testing.T) {
+	service := &AuthService{
+		authDao: &verifyAuthAuthDao{auths: []*models.Auth{{AppId: "app-123", ApiKey: "key", ApiSecret: "secret"}}},
+		appDao:  &verifyAuthAppDao{apps: []*models.App{{AppId: "app-123", IsDisable: true}}},
+	}
+
+	_, err := service.VerifyAppByAPIKeySecret("key", "secret")
+	if err == nil {
+		t.Fatal("Expected disabled app authentication to fail")
+	}
+	var bizErr BizErr
+	if !errors.As(err, &bizErr) || bizErr.Code() != AppIdNotExist {
+		t.Fatalf("Expected AppIdNotExist for disabled app, got %v", err)
+	}
+}
+
+func TestAuthService_QueryAppByAPIKey_RejectsDisabledApp(t *testing.T) {
+	service := &AuthService{
+		authDao: &verifyAuthAuthDao{auths: []*models.Auth{{AppId: "app-123", ApiKey: "key"}}},
+		appDao:  &verifyAuthAppDao{apps: []*models.App{{AppId: "app-123", IsDisable: true}}},
+	}
+
+	if _, err := service.QueryAppByAPIKey("key"); err == nil {
+		t.Fatal("Expected legacy API-key lookup to reject disabled app")
 	}
 }

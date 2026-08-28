@@ -4,6 +4,7 @@ import base64
 import datetime
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,7 +15,14 @@ from common.otlp.trace.span import Span
 
 import agent.infra.app_auth as app_auth
 from agent.exceptions import middleware_exc
-from agent.infra.app_auth import APPAuth, AuthConfig, MaasAuth, hashlib_256, http_date
+from agent.infra.app_auth import (
+    TENANT_INTERNAL_API_KEY_HEADER,
+    APPAuth,
+    AuthConfig,
+    MaasAuth,
+    hashlib_256,
+    http_date,
+)
 
 
 @dataclass
@@ -131,8 +139,8 @@ class TestAPPAuth:
                 "APP_AUTH_HOST": "test.example.com",
                 "APP_AUTH_ROUTER": "/api/auth",
                 "APP_AUTH_PROT": "https",
-                "APP_AUTH_API_KEY": "test_key",
-                "APP_AUTH_SECRET": "test_secret",
+                "APP_AUTH_API_KEY": "k" * 48,
+                "APP_AUTH_SECRET": "s" * 48,
             },
         ):
             return APPAuth()
@@ -151,6 +159,66 @@ class TestAPPAuth:
         except Exception:
             pytest.fail("Signature should be valid base64 encoded")
 
+    def test_loads_credentials_from_files(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        key_file = tmp_path / "tenant-key"
+        secret_file = tmp_path / "tenant-secret"
+        key_file.write_text("k" * 48 + "\n", encoding="utf-8")
+        secret_file.write_text("s" * 48 + "\n", encoding="utf-8")
+        monkeypatch.delenv("APP_AUTH_API_KEY", raising=False)
+        monkeypatch.delenv("APP_AUTH_SECRET", raising=False)
+        monkeypatch.setenv("APP_AUTH_API_KEY_FILE", str(key_file))
+        monkeypatch.setenv("APP_AUTH_SECRET_FILE", str(secret_file))
+
+        auth = APPAuth()
+
+        assert auth.config.api_key == "k" * 48
+        assert auth.config.secret == "s" * 48
+
+    def test_placeholder_environment_values_do_not_shadow_credential_files(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        key_file = tmp_path / "tenant-key"
+        secret_file = tmp_path / "tenant-secret"
+        key_file.write_text("k" * 48 + "\n", encoding="utf-8")
+        secret_file.write_text("s" * 48 + "\n", encoding="utf-8")
+        monkeypatch.setenv("APP_AUTH_API_KEY", "YOUR_APP_AUTH_API_KEY")
+        monkeypatch.setenv("APP_AUTH_SECRET", "YOUR_APP_AUTH_SECRET")
+        monkeypatch.setenv("APP_AUTH_API_KEY_FILE", str(key_file))
+        monkeypatch.setenv("APP_AUTH_SECRET_FILE", str(secret_file))
+
+        auth = APPAuth()
+
+        assert auth.config.api_key == "k" * 48
+        assert auth.config.secret == "s" * 48
+
+    @pytest.mark.parametrize(
+        ("api_key", "api_secret"),
+        [
+            (
+                "7b709739e8da44536127a333c7603a83",
+                "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy",
+            ),
+            ("short", "also-short"),
+        ],
+    )
+    def test_rejects_disclosed_or_weak_environment_credentials(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        api_key: str,
+        api_secret: str,
+    ) -> None:
+        monkeypatch.setenv("APP_AUTH_API_KEY", api_key)
+        monkeypatch.setenv("APP_AUTH_SECRET", api_secret)
+        monkeypatch.delenv("APP_AUTH_API_KEY_FILE", raising=False)
+        monkeypatch.delenv("APP_AUTH_SECRET_FILE", raising=False)
+
+        auth = APPAuth()
+
+        assert auth.config.api_key == ""
+        assert auth.config.secret == ""
+
     def test_init_header(self, app_auth: APPAuth) -> None:
         """Test request header initialization"""
         data = "test_data"
@@ -164,6 +232,7 @@ class TestAPPAuth:
         assert headers["Content-Type"] == "application/json"
         assert "api_key" in headers["Authorization"]
         assert "signature" in headers["Authorization"]
+        assert headers[TENANT_INTERNAL_API_KEY_HEADER] == "s" * 48
 
     @pytest.mark.asyncio
     async def test_app_detail_success(self, app_auth: APPAuth) -> None:
@@ -212,9 +281,7 @@ class TestAPPAuth:
     async def test_app_detail_timeout(self, app_auth: APPAuth) -> None:
         """Test timeout when retrieving app details"""
 
-        async def mock_get(
-            *args: Any, **kwargs: Any
-        ) -> AsyncMock:  # noqa: ANN001, D401
+        def mock_get(*args: Any, **kwargs: Any) -> AsyncMock:  # noqa: ANN001, D401
             raise aiohttp.ClientError("timeout")
 
         with patch("aiohttp.ClientSession.get", new=mock_get):
@@ -249,6 +316,36 @@ class TestMaasAuth:
             sk = await maas_auth.sk(span)
 
             assert sk == "test_key:test_secret"
+
+    @pytest.mark.asyncio
+    async def test_sk_does_not_record_credentials(self, maas_auth: MaasAuth) -> None:
+        mock_app_detail = {
+            "code": 0,
+            "data": [
+                {"auth_list": [{"api_key": "trace_key", "api_secret": "trace_secret"}]}
+            ],
+        }
+        span = MagicMock()
+        span_context = MagicMock()
+        span.start.return_value.__enter__.return_value = span_context
+
+        with patch.object(APPAuth, "app_detail", return_value=mock_app_detail):
+            sk = await maas_auth.sk(span)
+
+        assert sk == "trace_key:trace_secret"
+        recorded = repr(span_context.add_info_events.call_args_list)
+        assert "trace_key" not in recorded
+        assert "trace_secret" not in recorded
+
+    @pytest.mark.asyncio
+    async def test_sk_rejects_missing_credential_fields(
+        self, maas_auth: MaasAuth, span: Span
+    ) -> None:
+        mock_app_detail = {"code": 0, "data": [{"auth_list": [{}]}]}
+
+        with patch.object(APPAuth, "app_detail", return_value=mock_app_detail):
+            with pytest.raises(Exception):
+                await maas_auth.sk(span)
 
     @pytest.mark.asyncio
     async def test_sk_app_detail_none(self, maas_auth: MaasAuth, span: Span) -> None:

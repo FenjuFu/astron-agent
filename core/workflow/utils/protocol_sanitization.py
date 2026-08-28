@@ -27,6 +27,14 @@ _SANDBOX_ALLOWED_KEYS = {
     "nodeid",
 }
 
+# These exact bootstrap credentials were published in historical deployment
+# examples. They are deployment secrets, not legitimate model credentials, so
+# remove only these disclosed values wherever an old protocol copy is loaded.
+_DISCLOSED_BOOTSTRAP_VALUES = {
+    "7b709739e8da44536127a333c7603a83",
+    "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy",
+}
+
 # These fields were previously copied from deployment configuration into persisted
 # workflow JSON.  Match their camelCase, snake_case, kebab-case, and case variants by
 # comparing normalized keys.  Deliberately do not include apiKey/api_key: those names
@@ -103,6 +111,8 @@ def _sanitize_value(value: Any) -> Any:
     if isinstance(value, list):
         return [_sanitize_value(item) for item in value]
     if isinstance(value, str):
+        if value in _DISCLOSED_BOOTSTRAP_VALUES:
+            return ""
         return _sanitize_json_string(value)
     return copy.deepcopy(value)
 

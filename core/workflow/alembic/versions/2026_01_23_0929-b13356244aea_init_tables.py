@@ -188,26 +188,6 @@ def upgrade() -> None:
     # ### end Alembic commands ###
 
     # Insert initial data
-    app_table = sa.table(
-        "app",
-        sa.column("id", sa.BigInteger),
-        sa.column("name", sa.String),
-        sa.column("alias_id", sa.String),
-        sa.column("api_key", sa.String),
-        sa.column("api_secret", sa.String),
-        sa.column("description", sa.String),
-        sa.column("is_tenant", sa.SmallInteger),
-        sa.column("source", sa.SmallInteger),
-        sa.column("actual_source", sa.SmallInteger),
-        sa.column("plat_release_auth", sa.SmallInteger),
-        sa.column("status", sa.SmallInteger),
-        sa.column("audit_policy", sa.SmallInteger),
-        sa.column("create_by", sa.BigInteger),
-        sa.column("update_by", sa.BigInteger),
-        sa.column("create_at", sa.DateTime),
-        sa.column("update_at", sa.DateTime),
-    )
-
     app_source_table = sa.table(
         "app_source",
         sa.column("id", sa.BigInteger),
@@ -216,31 +196,6 @@ def upgrade() -> None:
         sa.column("description", sa.String),
         sa.column("create_at", sa.DateTime),
         sa.column("update_at", sa.DateTime),
-    )
-
-    # Insert default app
-    op.bulk_insert(
-        app_table,
-        [
-            {
-                "id": 1,
-                "name": "星辰",
-                "alias_id": "680ab54f",
-                "api_key": "7b709739e8da44536127a333c7603a83",
-                "api_secret": "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy",
-                "description": "星辰",
-                "is_tenant": 1,
-                "source": 1,
-                "actual_source": 1,
-                "plat_release_auth": 1,
-                "status": 1,
-                "audit_policy": 0,
-                "create_by": 1,
-                "update_by": 1,
-                "create_at": datetime(2025, 9, 20, 14, 10, 48),
-                "update_at": datetime(2025, 9, 20, 14, 10, 51),
-            }
-        ],
     )
 
     # Insert default app_source

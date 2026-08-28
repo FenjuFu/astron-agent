@@ -113,9 +113,10 @@ jobs:
           -Dtest=S3ClientUtilMinioPolicyCompatibilityIT test
 
       - name: Verify rendered sandbox credential contract
-        run: >-
-          python3 docker/astronAgent/scripts/verify_security_contract.py
-          --ci-placeholder-required-env
+        run: python3 docker/astronAgent/scripts/verify_security_contract.py
+
+      - name: Verify Helm internal credential contract
+        run: python3 helm/astron-agent/tests/verify_tenant_bootstrap.py
 
   # ============================================================================
   # Stage 2: Build astron Agent Docker Images (Parallel Jobs)

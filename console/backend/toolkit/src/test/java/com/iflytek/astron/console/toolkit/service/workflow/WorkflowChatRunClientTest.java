@@ -25,6 +25,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class WorkflowChatRunClientTest {
 
     private static final String CONTEXT_PATH = "/workflow/v1/chat/completions";
+    private static final String INTERNAL_KEY =
+            "0123456789abcdef0123456789abcdef";
 
     private HttpServer server;
 
@@ -49,6 +51,8 @@ class WorkflowChatRunClientTest {
         WorkflowChatRunClient client = new WorkflowChatRunClient(commonConfig);
         ReflectionTestUtils.setField(client, "chatUrl",
                 "http://127.0.0.1:" + server.getAddress().getPort() + CONTEXT_PATH);
+        ReflectionTestUtils.setField(
+                client, "workflowInternalApiKey", INTERNAL_KEY);
         return client;
     }
 
@@ -57,11 +61,14 @@ class WorkflowChatRunClientTest {
         String responseJson = "{\"code\":0,\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}";
         AtomicReference<String> capturedAuth = new AtomicReference<>();
         AtomicReference<String> capturedUser = new AtomicReference<>();
+        AtomicReference<String> capturedInternalKey = new AtomicReference<>();
         AtomicReference<String> capturedBody = new AtomicReference<>();
 
         WorkflowChatRunClient client = newClient(exchange -> {
             capturedAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
             capturedUser.set(exchange.getRequestHeaders().getFirst("X-Consumer-Username"));
+            capturedInternalKey.set(
+                    exchange.getRequestHeaders().getFirst("X-Workflow-Internal-Key"));
             capturedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
 
             byte[] resp = responseJson.getBytes(StandardCharsets.UTF_8);
@@ -81,6 +88,7 @@ class WorkflowChatRunClientTest {
         assertThat(result).isEqualTo(responseJson);
         assertThat(capturedUser.get()).isEqualTo("app-id-1");
         assertThat(capturedAuth.get()).isEqualTo("Bearer key-1:secret-1");
+        assertThat(capturedInternalKey.get()).isEqualTo(INTERNAL_KEY);
 
         JSONObject sentBody = JSON.parseObject(capturedBody.get());
         assertThat(sentBody.getString("flow_id")).isEqualTo("flow123");
@@ -114,5 +122,20 @@ class WorkflowChatRunClientTest {
         String result = client.chat(new JSONObject().fluentPut("flow_id", "flow123"));
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    void chatRejectsPublishedPlaceholderBeforeIssuingRequest() throws Exception {
+        WorkflowChatRunClient client = newClient(exchange -> {
+            throw new AssertionError("request must not be issued");
+        });
+        ReflectionTestUtils.setField(
+                client,
+                "workflowInternalApiKey",
+                "CHANGE_ME_WORKFLOW_INTERNAL_API_KEY");
+
+        assertThatThrownBy(() -> client.chat(new JSONObject()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageNotContaining("CHANGE_ME_WORKFLOW_INTERNAL_API_KEY");
     }
 }

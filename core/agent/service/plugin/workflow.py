@@ -17,7 +17,35 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from agent.exceptions.plugin_exc import RunWorkflowExc
+from agent.infra.credentials import credential_from_env_or_file
+from agent.infra.workflow_internal_auth import (
+    WORKFLOW_INTERNAL_API_KEY_HEADER,
+    WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER,
+)
 from agent.service.plugin.base import BasePlugin, PluginResponse
+
+
+def _redact_workflow_request_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Remove internal authentication and signed trace headers from telemetry."""
+    trace_safe_headers = redact_trusted_trace_headers(headers)
+    return {
+        key: value
+        for key, value in trace_safe_headers.items()
+        if key.lower() != WORKFLOW_INTERNAL_API_KEY_HEADER.lower()
+    }
+
+
+def _configured_workflow_internal_api_key() -> str:
+    """Load the deployment key once per request and fail closed if unavailable."""
+    internal_api_key = credential_from_env_or_file(
+        "WORKFLOW_INTERNAL_API_KEY",
+        "WORKFLOW_INTERNAL_API_KEY_FILE",
+        min_length=32,
+        placeholders=(WORKFLOW_INTERNAL_API_KEY_PLACEHOLDER,),
+    )
+    if not internal_api_key:
+        raise RunWorkflowExc
+    return internal_api_key
 
 
 class _AgentConfig(BaseModel):
@@ -57,6 +85,7 @@ class WorkflowPluginRunner(BaseModel):
 
     def _build_request_params(self, action_input: dict) -> dict:
         """Build request parameters"""
+        internal_api_key = _configured_workflow_internal_api_key()
         return {
             "model": "",
             "messages": [],
@@ -69,6 +98,7 @@ class WorkflowPluginRunner(BaseModel):
             },
             "extra_headers": {
                 "X-consumer-username": self.app_id,
+                WORKFLOW_INTERNAL_API_KEY_HEADER: internal_api_key,
                 **inject_trusted_langfuse_context(
                     method="POST",
                     audience=WORKFLOW_TRACE_AUDIENCE,
@@ -129,7 +159,7 @@ class WorkflowPluginRunner(BaseModel):
             params = self._build_request_params(action_input)
             logged_params = {
                 **params,
-                "extra_headers": redact_trusted_trace_headers(
+                "extra_headers": _redact_workflow_request_headers(
                     params.get("extra_headers", {})
                 ),
             }
@@ -213,16 +243,25 @@ class WorkflowPluginFactory(BaseModel):
                     )
                 }
             )
+            internal_api_key = _configured_workflow_internal_api_key()
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    agent_config.GET_WORKFLOWS_URL, json={"flow_id": workflow_id}
+                    agent_config.GET_WORKFLOWS_URL,
+                    json={"flow_id": workflow_id},
+                    headers={WORKFLOW_INTERNAL_API_KEY_HEADER: internal_api_key},
                 ) as response:
                     response.raise_for_status()
                     result = await response.json()
+                    telemetry_summary = {
+                        "code": result.get("code"),
+                        "sid": result.get("sid"),
+                        "flow_id": workflow_id,
+                        "has_data": result.get("data") is not None,
+                    }
                     sp.add_info_events(
                         attributes={
                             "workflow-plugin-do-query-workflow-schema-outputs": (
-                                json.dumps(result, ensure_ascii=False)
+                                json.dumps(telemetry_summary, ensure_ascii=False)
                             )
                         }
                     )

@@ -11,7 +11,7 @@ import os
 from typing import Annotated, Optional, Union
 
 from common.utils.snowfake import get_id
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header
 from starlette.responses import JSONResponse, StreamingResponse
 
 from workflow.cache.event_registry import Event, EventRegistry
@@ -23,12 +23,18 @@ from workflow.domain.entities.response import Streaming
 from workflow.engine.callbacks.openai_types_sse import LLMGenerate
 from workflow.exception.e import CustomException
 from workflow.exception.errors.err_code import CodeEnum
+from workflow.extensions.fastapi.middleware.auth import (
+    require_workflow_internal_api_key,
+)
 from workflow.extensions.middleware.database.utils import session_getter
 from workflow.extensions.otlp.metric.meter import Meter
 from workflow.extensions.otlp.trace.span import Span
 from workflow.service import app_service, audit_service, chat_service, flow_service
 
-router = APIRouter(tags=["SSE_DEBUG_CHAT"])
+router = APIRouter(
+    tags=["SSE_DEBUG_CHAT"],
+    dependencies=[Depends(require_workflow_internal_api_key)],
+)
 
 
 @router.post("/debug/chat/completions", response_model=None)

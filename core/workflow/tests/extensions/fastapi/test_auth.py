@@ -6,7 +6,10 @@ covering all core functionality including authentication flow, header validation
 API key verification, cache operations, and error handling scenarios.
 """
 
+import hashlib
+import hmac
 import os
+import time
 from typing import List
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -16,10 +19,36 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from workflow.exception.e import CustomException
 from workflow.exception.errors.err_code import CodeEnum
-from workflow.extensions.fastapi.base import AUTH_OPEN_API_PATHS, JSONResponseBase
-from workflow.extensions.fastapi.middleware.auth import AuthMiddleware
+from workflow.extensions.fastapi.base import (
+    AUTH_OPEN_API_PATHS,
+    CHAT_OPEN_API_PATHS,
+    JSONResponseBase,
+)
+from workflow.extensions.fastapi.middleware.auth import (
+    VERIFIED_CREDENTIAL_CACHE_PREFIX,
+    WORKFLOW_GATEWAY_SIGNATURE_HEADER,
+    WORKFLOW_GATEWAY_TIMESTAMP_HEADER,
+    WORKFLOW_INTERNAL_API_KEY_ENV,
+    WORKFLOW_INTERNAL_API_KEY_HEADER,
+    AuthMiddleware,
+)
+from workflow.utils.credentials import TENANT_INTERNAL_API_KEY_HEADER
+from workflow.utils.credentials import (
+    credential_cache_key as build_credential_cache_key,
+)
 
 pytestmark = pytest.mark.asyncio
+
+
+def credential_cache_key(credential: str) -> str:
+    return build_credential_cache_key(credential)
+
+
+def gateway_signature(
+    key: str, method: str, path: str, app_id: str, timestamp: str
+) -> str:
+    payload = f"{method.upper()}\n{path}\n{app_id}\n{timestamp}".encode()
+    return hmac.new(key.encode(), payload, hashlib.sha256).hexdigest()
 
 
 def create_mock_span_context() -> tuple[Mock, Mock]:
@@ -88,14 +117,44 @@ class TestAuthMiddleware:
 
     @patch.dict(
         os.environ,
-        {"APP_MANAGE_PLAT_KEY": "test_key", "APP_MANAGE_PLAT_SECRET": "test_secret"},
+        {"APP_MANAGE_PLAT_KEY": "k" * 32, "APP_MANAGE_PLAT_SECRET": "s" * 32},
+        clear=True,
     )
     def test_init_with_env_vars(self, mock_app: ASGIApp) -> None:
         """Test AuthMiddleware initialization with environment variables."""
         middleware = AuthMiddleware(mock_app)
 
-        assert middleware.api_key == "test_key"
-        assert middleware.api_secret == "test_secret"
+        assert middleware.api_key == "k" * 32
+        assert middleware.api_secret == "s" * 32
+
+    @pytest.mark.parametrize(
+        ("api_key", "api_secret"),
+        [
+            ("short", "also-short"),
+            (
+                "7b709739e8da44536127a333c7603a83",
+                "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy",
+            ),
+        ],
+    )
+    def test_init_rejects_weak_or_published_management_credentials(
+        self,
+        mock_app: ASGIApp,
+        api_key: str,
+        api_secret: str,
+    ) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "APP_MANAGE_PLAT_KEY": api_key,
+                "APP_MANAGE_PLAT_SECRET": api_secret,
+            },
+            clear=True,
+        ):
+            middleware = AuthMiddleware(mock_app)
+
+        assert middleware.api_key == ""
+        assert middleware.api_secret == ""
 
     @patch.dict(os.environ, {}, clear=True)
     def test_init_without_env_vars(self, mock_app: ASGIApp) -> None:
@@ -124,23 +183,157 @@ class TestAuthMiddleware:
             assert result == mock_call_next.return_value
             mock_call_next.assert_called_once_with(mock_request)
 
-    async def test_dispatch_with_x_consumer_username(
+    async def test_dispatch_rejects_untrusted_x_consumer_username(
         self,
         auth_middleware: AuthMiddleware,
         mock_request: Mock,
         mock_call_next: AsyncMock,
     ) -> None:
-        """Test dispatch bypasses auth when x-consumer-username header is present."""
+        """A caller cannot bypass a protected route with a forged identity header."""
         mock_request.headers = {"x-consumer-username": "test_user"}
+        mock_request.url.path = AUTH_OPEN_API_PATHS[0]
 
         with patch("workflow.extensions.otlp.trace.span.Span") as mock_span_class:
             mock_span, mock_span_ctx = create_mock_span_context()
             mock_span_class.return_value = mock_span
+            with patch.object(
+                JSONResponseBase, "generate_error_response"
+            ) as mock_error_response:
+                mock_error_response.return_value = {"error": "authorization required"}
 
+                result = await auth_middleware.dispatch(mock_request, mock_call_next)
+
+                assert result == {"error": "authorization required"}
+                mock_call_next.assert_not_called()
+
+    @patch.dict(
+        os.environ,
+        {WORKFLOW_INTERNAL_API_KEY_ENV: "i" * 32},
+        clear=False,
+    )
+    async def test_dispatch_trusts_consumer_from_authenticated_internal_peer(
+        self,
+        auth_middleware: AuthMiddleware,
+        mock_request: Mock,
+        mock_call_next: AsyncMock,
+    ) -> None:
+        mock_request.headers = {
+            "x-consumer-username": "test_user",
+            WORKFLOW_INTERNAL_API_KEY_HEADER: "i" * 32,
+        }
+        mock_request.scope["headers"] = [
+            (b"x-consumer-username", b"test_user"),
+            (WORKFLOW_INTERNAL_API_KEY_HEADER.lower().encode(), b"i" * 32),
+        ]
+        mock_request.url.path = AUTH_OPEN_API_PATHS[0]
+
+        result = await auth_middleware.dispatch(mock_request, mock_call_next)
+
+        assert result == mock_call_next.return_value
+        mock_call_next.assert_called_once_with(mock_request)
+        assert mock_request.scope["headers"] == [(b"x-consumer-username", b"test_user")]
+
+    @patch.dict(
+        os.environ,
+        {WORKFLOW_INTERNAL_API_KEY_ENV: "g" * 32},
+        clear=False,
+    )
+    async def test_dispatch_trusts_short_lived_gateway_identity_signature(
+        self,
+        auth_middleware: AuthMiddleware,
+        mock_request: Mock,
+        mock_call_next: AsyncMock,
+    ) -> None:
+        timestamp = "1700000000"
+        app_id = "gateway-app"
+        path = CHAT_OPEN_API_PATHS[0]
+        signature = gateway_signature("g" * 32, "POST", path, app_id, timestamp)
+        assert (
+            signature
+            == "6261d5595286ac9407951e6c4c690bd1c50c2fbfe4f29addc50e3f437ef6a871"
+        )
+        mock_request.method = "POST"
+        mock_request.url.path = path
+        mock_request.headers = {
+            "x-consumer-username": app_id,
+            WORKFLOW_GATEWAY_TIMESTAMP_HEADER: timestamp,
+            WORKFLOW_GATEWAY_SIGNATURE_HEADER: signature,
+        }
+        mock_request.scope["headers"] = [
+            (b"x-consumer-username", app_id.encode()),
+            (WORKFLOW_GATEWAY_TIMESTAMP_HEADER.lower().encode(), timestamp.encode()),
+            (WORKFLOW_GATEWAY_SIGNATURE_HEADER.lower().encode(), signature.encode()),
+        ]
+
+        with patch(
+            "workflow.extensions.fastapi.middleware.auth.time.time",
+            return_value=1700000000,
+        ):
             result = await auth_middleware.dispatch(mock_request, mock_call_next)
 
-            assert result == mock_call_next.return_value
-            mock_call_next.assert_called_once_with(mock_request)
+        assert result == mock_call_next.return_value
+        assert mock_request.scope["headers"] == [
+            (b"x-consumer-username", app_id.encode())
+        ]
+
+    @pytest.mark.parametrize("invalid_assertion", ["expired", "wrong-signature"])
+    @patch.dict(
+        os.environ,
+        {WORKFLOW_INTERNAL_API_KEY_ENV: "g" * 32},
+        clear=False,
+    )
+    async def test_dispatch_rejects_invalid_gateway_identity_signature(
+        self,
+        auth_middleware: AuthMiddleware,
+        mock_request: Mock,
+        mock_call_next: AsyncMock,
+        invalid_assertion: str,
+    ) -> None:
+        timestamp = str(
+            int(time.time()) - 120
+            if invalid_assertion == "expired"
+            else int(time.time())
+        )
+        path = CHAT_OPEN_API_PATHS[0]
+        signature = gateway_signature("g" * 32, "POST", path, "forged-app", timestamp)
+        if invalid_assertion == "wrong-signature":
+            signature = "0" * 64
+        mock_request.method = "POST"
+        mock_request.url.path = path
+        mock_request.headers = {
+            "authorization": "Bearer public-key:public-secret",
+            "x-consumer-username": "forged-app",
+            WORKFLOW_GATEWAY_TIMESTAMP_HEADER: timestamp,
+            WORKFLOW_GATEWAY_SIGNATURE_HEADER: signature,
+        }
+        mock_request.scope["headers"] = [
+            (b"authorization", b"Bearer public-key:public-secret"),
+            (b"x-consumer-username", b"forged-app"),
+            (WORKFLOW_GATEWAY_TIMESTAMP_HEADER.lower().encode(), timestamp.encode()),
+            (WORKFLOW_GATEWAY_SIGNATURE_HEADER.lower().encode(), signature.encode()),
+        ]
+
+        with patch.object(
+            auth_middleware,
+            "_get_app_source_detail_with_api_key",
+            new=AsyncMock(return_value="verified-app"),
+        ):
+            await auth_middleware.dispatch(mock_request, mock_call_next)
+
+        assert (b"x-consumer-username", b"verified-app") in mock_request.scope[
+            "headers"
+        ]
+        assert (b"x-consumer-username", b"forged-app") not in mock_request.scope[
+            "headers"
+        ]
+        assert not any(
+            name.lower()
+            in {
+                WORKFLOW_GATEWAY_TIMESTAMP_HEADER.lower().encode(),
+                WORKFLOW_GATEWAY_SIGNATURE_HEADER.lower().encode(),
+            }
+            for name, _ in mock_request.scope["headers"]
+        )
 
     async def test_dispatch_missing_authorization_header(
         self,
@@ -214,7 +407,10 @@ class TestAuthMiddleware:
                 "https://api.test.com/endpoint"
             )
 
-            assert result == {"Authorization": "test_auth_header"}
+            assert result == {
+                "Authorization": "test_auth_header",
+                TENANT_INTERNAL_API_KEY_HEADER: "test_secret",
+            }
             mock_build_auth.assert_called_once_with(
                 request_url="https://api.test.com/endpoint",
                 api_key="test_key",
@@ -252,10 +448,12 @@ class TestAuthMiddleware:
         with patch(
             "workflow.extensions.fastapi.middleware.auth.get_cache_service"
         ) as mock_get_cache:
-            mock_cache = {"workflow:app:api_key:test_key": "cached_app_id"}
+            mock_cache = {
+                f"{VERIFIED_CREDENTIAL_CACHE_PREFIX}:test_digest": "cached_app_id"
+            }
             mock_get_cache.return_value = mock_cache
 
-            result = auth_middleware._get_app_id_with_cache("test_key")
+            result = auth_middleware._get_app_id_with_cache("test_digest")
 
             assert result == "cached_app_id"
 
@@ -267,9 +465,12 @@ class TestAuthMiddleware:
             mock_cache: dict = {}
             mock_get_cache.return_value = mock_cache
 
-            auth_middleware._set_app_id_with_cache("test_key", "test_app_id")
+            auth_middleware._set_app_id_with_cache("test_digest", "test_app_id")
 
-            assert mock_cache["workflow:app:api_key:test_key"] == "test_app_id"
+            assert (
+                mock_cache[f"{VERIFIED_CREDENTIAL_CACHE_PREFIX}:test_digest"]
+                == "test_app_id"
+            )
 
     @pytest.mark.parametrize(
         "need_auth_paths,request_path,should_skip",
@@ -324,6 +525,11 @@ class TestAuthMiddleware:
             "123456",
         ],
     )
+    @patch.dict(
+        os.environ,
+        {WORKFLOW_INTERNAL_API_KEY_ENV: "t" * 32},
+        clear=False,
+    )
     async def test_dispatch_x_consumer_username_values(
         self,
         auth_middleware: AuthMiddleware,
@@ -331,8 +537,16 @@ class TestAuthMiddleware:
         mock_call_next: AsyncMock,
         x_consumer_username: str,
     ) -> None:
-        """Test dispatch with various x-consumer-username header values."""
-        mock_request.headers = {"x-consumer-username": x_consumer_username}
+        """Authenticated internal peers may supply supported consumer ID values."""
+        mock_request.headers = {
+            "x-consumer-username": x_consumer_username,
+            WORKFLOW_INTERNAL_API_KEY_HEADER: "t" * 32,
+        }
+        mock_request.scope["headers"] = [
+            (b"x-consumer-username", x_consumer_username.encode()),
+            (WORKFLOW_INTERNAL_API_KEY_HEADER.lower().encode(), b"t" * 32),
+        ]
+        mock_request.url.path = AUTH_OPEN_API_PATHS[0]
 
         with patch("workflow.extensions.otlp.trace.span.Span") as mock_span_class:
             mock_span, mock_span_ctx = create_mock_span_context()
@@ -342,6 +556,42 @@ class TestAuthMiddleware:
 
             assert result == mock_call_next.return_value
             mock_call_next.assert_called_once_with(mock_request)
+            assert mock_request.scope["headers"] == [
+                (b"x-consumer-username", x_consumer_username.encode())
+            ]
+
+    async def test_dispatch_wrong_internal_key_uses_verified_bearer_identity(
+        self,
+        auth_middleware: AuthMiddleware,
+        mock_request: Mock,
+        mock_call_next: AsyncMock,
+    ) -> None:
+        mock_request.headers = {
+            "authorization": "Bearer public-key:public-secret",
+            "x-consumer-username": "forged-app",
+            WORKFLOW_INTERNAL_API_KEY_HEADER: "wrong-internal-key",
+        }
+        mock_request.scope["headers"] = [
+            (b"authorization", b"Bearer public-key:public-secret"),
+            (b"x-consumer-username", b"forged-app"),
+            (WORKFLOW_INTERNAL_API_KEY_HEADER.lower().encode(), b"wrong-internal-key"),
+        ]
+        mock_request.url.path = AUTH_OPEN_API_PATHS[0]
+
+        with patch.object(
+            auth_middleware,
+            "_get_app_source_detail_with_api_key",
+            new=AsyncMock(return_value="verified-app"),
+        ):
+            await auth_middleware.dispatch(mock_request, mock_call_next)
+
+        raw_headers = mock_request.scope["headers"]
+        assert raw_headers.count((b"x-consumer-username", b"verified-app")) == 1
+        assert not any(
+            name.lower() == WORKFLOW_INTERNAL_API_KEY_HEADER.lower().encode()
+            for name, _ in raw_headers
+        )
+        assert (b"x-consumer-username", b"forged-app") not in raw_headers
 
     async def test_dispatch_x_consumer_username_empty_string(
         self,
@@ -452,16 +702,16 @@ class TestAuthMiddleware:
                     mock_call_next.assert_not_called()
 
     @pytest.mark.parametrize(
-        "authorization_header,expected_api_key",
+        "authorization_header,expected_api_key,expected_api_secret",
         [
-            ("Bearer test_key:test_secret", "test_key"),
-            ("Bearer api_key_123:secret_456", "api_key_123"),
-            ("Bearer key:value:extra", "key"),
+            ("Bearer test_key:test_secret", "test_key", "test_secret"),
+            ("Bearer api_key_123:secret_456", "api_key_123", "secret_456"),
+            ("Bearer key:value:extra", "key", "value:extra"),
         ],
     )
     @patch.dict(
         os.environ,
-        {"APP_MANAGE_PLAT_APP_DETAILS_WITH_API_KEY": "https://api.example.com/app"},
+        {"APP_MANAGE_PLAT_BASE_URL": "https://api.example.com"},
         clear=False,
     )
     async def test_get_app_source_detail_api_key_parsing(
@@ -469,6 +719,7 @@ class TestAuthMiddleware:
         auth_middleware: AuthMiddleware,
         authorization_header: str,
         expected_api_key: str,
+        expected_api_secret: str,
     ) -> None:
         """Test API key parsing from authorization header."""
         mock_span = Mock()
@@ -477,7 +728,7 @@ class TestAuthMiddleware:
         with patch.object(auth_middleware, "_get_app_id_with_cache") as mock_get_cache:
             mock_get_cache.return_value = None
 
-            with patch("httpx.AsyncClient.get") as mock_get:
+            with patch("httpx.AsyncClient.post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = {
@@ -485,7 +736,7 @@ class TestAuthMiddleware:
                     "data": {"appid": "test_app_id"},
                 }
                 mock_response.text = "success"
-                mock_get.return_value = mock_response
+                mock_post.return_value = mock_response
 
                 with patch.object(auth_middleware, "_set_app_id_with_cache"):
                     result = await auth_middleware._get_app_source_detail_with_api_key(
@@ -493,7 +744,18 @@ class TestAuthMiddleware:
                     )
 
                     assert result == "test_app_id"
-                    mock_get_cache.assert_called_once_with(expected_api_key)
+                    credential = authorization_header.split(" ", 1)[1]
+                    mock_get_cache.assert_called_once_with(
+                        credential_cache_key(credential)
+                    )
+                    mock_post.assert_called_once_with(
+                        "https://api.example.com/v2/app/key/verify",
+                        json={
+                            "api_key": expected_api_key,
+                            "api_secret": expected_api_secret,
+                        },
+                        headers={},
+                    )
 
     @pytest.mark.parametrize(
         "authorization_header",
@@ -513,35 +775,17 @@ class TestAuthMiddleware:
 
         with patch.dict(
             os.environ,
-            {"APP_MANAGE_PLAT_APP_DETAILS_WITH_API_KEY": "https://api.example.com/app"},
+            {"APP_MANAGE_PLAT_BASE_URL": "https://api.example.com"},
             clear=False,
         ):
-            # For "Bearer key:" case, this will not raise an exception as api_key will be "key"
-            if authorization_header == "Bearer key:":
-                with patch.object(
-                    auth_middleware, "_get_app_id_with_cache"
-                ) as mock_get_cache:
-                    mock_get_cache.return_value = None
-
-                    with patch("httpx.AsyncClient.get") as mock_get:
-                        mock_response = Mock()
-                        mock_response.status_code = 404
-                        mock_response.text = "Not found"
-                        mock_get.return_value = mock_response
-
-                        with pytest.raises(CustomException):
-                            await auth_middleware._get_app_source_detail_with_api_key(
-                                authorization_header, mock_span
-                            )
-            else:
-                with pytest.raises((CustomException, IndexError)):
-                    await auth_middleware._get_app_source_detail_with_api_key(
-                        authorization_header, mock_span
-                    )
+            with pytest.raises(CustomException):
+                await auth_middleware._get_app_source_detail_with_api_key(
+                    authorization_header, mock_span
+                )
 
     @patch.dict(
         os.environ,
-        {"APP_MANAGE_PLAT_APP_DETAILS_WITH_API_KEY": "https://api.example.com/app"},
+        {"APP_MANAGE_PLAT_BASE_URL": "https://api.example.com"},
         clear=False,
     )
     async def test_get_app_source_detail_with_cache_hit(
@@ -558,11 +802,48 @@ class TestAuthMiddleware:
             )
 
             assert result == "cached_app_id"
-            mock_get_cache.assert_called_once_with("test_key")
+            mock_get_cache.assert_called_once_with(
+                credential_cache_key("test_key:test_secret")
+            )
 
     @patch.dict(
         os.environ,
-        {"APP_MANAGE_PLAT_APP_DETAILS_WITH_API_KEY": "https://api.example.com/app"},
+        {"APP_MANAGE_PLAT_BASE_URL": "https://api.example.com"},
+        clear=False,
+    )
+    async def test_cache_does_not_accept_wrong_secret_for_cached_key(
+        self, auth_middleware: AuthMiddleware
+    ) -> None:
+        mock_span = Mock()
+        mock_span.add_info_event_async = AsyncMock()
+        valid_digest = credential_cache_key("same-key:valid-secret")
+
+        def cache_lookup(digest: str) -> str | None:
+            return "cached-app" if digest == valid_digest else None
+
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {"code": 10003, "message": "invalid credential"}
+        response.text = "invalid credential"
+
+        with patch.object(
+            auth_middleware, "_get_app_id_with_cache", side_effect=cache_lookup
+        ) as mock_get_cache, patch(
+            "httpx.AsyncClient.post", new=AsyncMock(return_value=response)
+        ) as mock_post:
+            with pytest.raises(CustomException):
+                await auth_middleware._get_app_source_detail_with_api_key(
+                    "Bearer same-key:wrong-secret", mock_span
+                )
+
+        wrong_digest = credential_cache_key("same-key:wrong-secret")
+        assert wrong_digest != valid_digest
+        mock_get_cache.assert_called_once_with(wrong_digest)
+        mock_post.assert_awaited_once()
+
+    @patch.dict(
+        os.environ,
+        {"APP_MANAGE_PLAT_BASE_URL": "https://api.example.com"},
         clear=False,
     )
     async def test_get_app_source_detail_http_error_status(
@@ -575,7 +856,7 @@ class TestAuthMiddleware:
         with patch.object(auth_middleware, "_get_app_id_with_cache") as mock_get_cache:
             mock_get_cache.return_value = None
 
-            with patch("httpx.AsyncClient.get") as mock_get:
+            with patch("httpx.AsyncClient.post") as mock_get:
                 mock_response = Mock()
                 mock_response.status_code = 404
                 mock_response.text = "Not found"
@@ -591,7 +872,7 @@ class TestAuthMiddleware:
                     == CodeEnum.APP_GET_WITH_REMOTE_FAILED_ERROR.code
                 )
                 mock_span.add_info_event_async.assert_called_once_with(
-                    "Application management platform response: Not found"
+                    "Application management platform credential verification completed"
                 )
 
     @pytest.mark.parametrize(
@@ -604,7 +885,7 @@ class TestAuthMiddleware:
     )
     @patch.dict(
         os.environ,
-        {"APP_MANAGE_PLAT_APP_DETAILS_WITH_API_KEY": "https://api.example.com/app"},
+        {"APP_MANAGE_PLAT_BASE_URL": "https://api.example.com"},
         clear=False,
     )
     async def test_get_app_source_detail_api_error_codes(
@@ -617,7 +898,7 @@ class TestAuthMiddleware:
         with patch.object(auth_middleware, "_get_app_id_with_cache") as mock_get_cache:
             mock_get_cache.return_value = None
 
-            with patch("httpx.AsyncClient.get") as mock_get:
+            with patch("httpx.AsyncClient.post") as mock_get:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = {
@@ -646,7 +927,7 @@ class TestAuthMiddleware:
     )
     @patch.dict(
         os.environ,
-        {"APP_MANAGE_PLAT_APP_DETAILS_WITH_API_KEY": "https://api.example.com/app"},
+        {"APP_MANAGE_PLAT_BASE_URL": "https://api.example.com"},
         clear=False,
     )
     async def test_get_app_source_detail_valid_responses(
@@ -659,7 +940,7 @@ class TestAuthMiddleware:
         with patch.object(auth_middleware, "_get_app_id_with_cache") as mock_get_cache:
             mock_get_cache.return_value = None
 
-            with patch("httpx.AsyncClient.get") as mock_get:
+            with patch("httpx.AsyncClient.post") as mock_get:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = {"code": 0, **response_data}
@@ -674,7 +955,9 @@ class TestAuthMiddleware:
                     )
 
                     assert result == expected_appid
-                    mock_set_cache.assert_called_once_with("test_key", expected_appid)
+                    mock_set_cache.assert_called_once_with(
+                        credential_cache_key("test_key:test_secret"), expected_appid
+                    )
 
     @pytest.mark.parametrize(
         "response_data",
@@ -687,7 +970,7 @@ class TestAuthMiddleware:
     )
     @patch.dict(
         os.environ,
-        {"APP_MANAGE_PLAT_APP_DETAILS_WITH_API_KEY": "https://api.example.com/app"},
+        {"APP_MANAGE_PLAT_BASE_URL": "https://api.example.com"},
         clear=False,
     )
     async def test_get_app_source_detail_missing_appid(
@@ -700,7 +983,7 @@ class TestAuthMiddleware:
         with patch.object(auth_middleware, "_get_app_id_with_cache") as mock_get_cache:
             mock_get_cache.return_value = None
 
-            with patch("httpx.AsyncClient.get") as mock_get:
+            with patch("httpx.AsyncClient.post") as mock_get:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = {"code": 0, **response_data}
@@ -751,7 +1034,7 @@ class TestAuthMiddleware:
             with patch.object(auth_middleware, "_gen_app_auth_header") as mock_gen_auth:
                 mock_gen_auth.return_value = {"Authorization": "test_header"}
 
-                with patch("httpx.AsyncClient.get") as mock_get:
+                with patch("httpx.AsyncClient.post") as mock_get:
                     mock_response = Mock()
                     mock_response.status_code = 200
                     mock_response.json.return_value = {
@@ -767,9 +1050,10 @@ class TestAuthMiddleware:
                         )
 
                         mock_gen_auth.assert_called_once_with(
-                            "https://api.example.com/v2/app/key/api_key/test_key"
+                            "https://api.example.com/v2/app/key/verify"
                         )
                         mock_get.assert_called_once_with(
-                            "https://api.example.com/v2/app/key/api_key/test_key",
+                            "https://api.example.com/v2/app/key/verify",
+                            json={"api_key": "test_key", "api_secret": "test_secret"},
                             headers={"Authorization": "test_header"},
                         )

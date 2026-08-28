@@ -1,4 +1,3 @@
-import json
 import os
 
 from common.utils.hmac_auth import HMACAuth
@@ -10,6 +9,10 @@ from workflow.domain.models.app_source import AppSource
 from workflow.exception.e import CustomException
 from workflow.exception.errors.err_code import CodeEnum
 from workflow.extensions.otlp.trace.span import Span
+from workflow.utils.credentials import (
+    TENANT_INTERNAL_API_KEY_HEADER,
+    credential_from_env_or_file,
+)
 
 
 def _gen_app_auth_header(url: str) -> dict[str, str]:
@@ -20,19 +23,26 @@ def _gen_app_auth_header(url: str) -> dict[str, str]:
     :return: Dictionary containing authentication headers,
              empty dict if credentials are missing
     """
-    # Retrieve API credentials from environment variables
-    api_key = os.getenv("APP_MANAGE_PLAT_KEY", "")
-    api_secret = os.getenv("APP_MANAGE_PLAT_SECRET", "")
+    # Compose supplies the same credentials through read-only files so users do
+    # not have to copy generated secrets into .env.
+    api_key = credential_from_env_or_file(
+        "APP_MANAGE_PLAT_KEY", "APP_MANAGE_PLAT_KEY_FILE"
+    )
+    api_secret = credential_from_env_or_file(
+        "APP_MANAGE_PLAT_SECRET", "APP_MANAGE_PLAT_SECRET_FILE"
+    )
 
     # Return empty dict if credentials are not configured
     if not api_key or not api_secret:
         return {}
 
-    return HMACAuth.build_auth_header(
+    headers = HMACAuth.build_auth_header(
         request_url=url,
         api_key=api_key,
         api_secret=api_secret,
     )
+    headers[TENANT_INTERNAL_API_KEY_HEADER] = api_secret
+    return headers
 
 
 async def get_app_source_id(app_id: str, span: Span) -> str:
@@ -59,7 +69,8 @@ async def get_app_source_id(app_id: str, span: Span) -> str:
     # Check HTTP response status
     if resp.status_code != 200:
         raise CustomException(
-            CodeEnum.APP_GET_WITH_REMOTE_FAILED_ERROR, cause_error=resp.text
+            CodeEnum.APP_GET_WITH_REMOTE_FAILED_ERROR,
+            cause_error=f"management platform status={resp.status_code}",
         )
 
     # Check API response code
@@ -67,14 +78,10 @@ async def get_app_source_id(app_id: str, span: Span) -> str:
     if code != 0:
         raise CustomException(
             CodeEnum.APP_GET_WITH_REMOTE_FAILED_ERROR,
-            cause_error=json.dumps(resp.json(), ensure_ascii=False),
+            cause_error=f"management platform code={code}",
         )
 
-    # Log the response data for debugging
-    await span.add_info_event_async(
-        "Application management platform response: "
-        + json.dumps(resp.json(), ensure_ascii=False)
-    )
+    await span.add_info_event_async("Application source lookup completed")
 
     # Extract and return the source ID from the response
     return resp.json().get("data", [{}])[0].get("source", "")
@@ -104,7 +111,8 @@ async def get_app_source_detail(app_id: str, span: Span) -> tuple[str, str, str,
     # Check HTTP response status
     if resp.status_code != 200:
         raise CustomException(
-            CodeEnum.APP_GET_WITH_REMOTE_FAILED_ERROR, cause_error=resp.text
+            CodeEnum.APP_GET_WITH_REMOTE_FAILED_ERROR,
+            cause_error=f"management platform status={resp.status_code}",
         )
 
     # Check API response code
@@ -112,7 +120,7 @@ async def get_app_source_detail(app_id: str, span: Span) -> tuple[str, str, str,
     if code != 0:
         raise CustomException(
             CodeEnum.APP_GET_WITH_REMOTE_FAILED_ERROR,
-            cause_error=json.dumps(resp.json(), ensure_ascii=False),
+            cause_error=f"management platform code={code}",
         )
 
     # Extract response data and validate
@@ -122,11 +130,8 @@ async def get_app_source_detail(app_id: str, span: Span) -> tuple[str, str, str,
             CodeEnum.APP_GET_WITH_REMOTE_FAILED_ERROR, cause_error="data is null"
         )
 
-    # Log the response data for debugging
-    await span.add_info_event_async(
-        "Application management platform response: "
-        + json.dumps(resp.json(), ensure_ascii=False)
-    )
+    # The response contains API credentials; record only non-sensitive outcome data.
+    await span.add_info_event_async("Application detail lookup completed")
 
     # Extract application basic information
     name = data[0].get("name")

@@ -37,7 +37,7 @@ api:
     deleteXinghuoDatasetFileUrl: http://127.0.0.1:8080/dataset/deleteXinghuoDatasetFile
     deleteXinghuoDatasetUrl: http://127.0.0.1:8080/dataset/deleteXinghuoDataset
     rpaUrl: ${RPA_URL:https://newapi.iflyrpa.com}
-    appIdQryUrl: http://10.1.87.65:5052
+    appAuthVerifyUrl: ${TENANT_VERIFY_APP_AUTH:http://127.0.0.1:5052/v2/app/key/verify}
 
 # Business-specific configuration
 biz:

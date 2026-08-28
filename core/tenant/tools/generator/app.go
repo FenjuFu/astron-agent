@@ -2,16 +2,20 @@ package generator
 
 import (
 	"bytes"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
-	"math/rand"
+	"io"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+var credentialRandomReader io.Reader = cryptorand.Reader
 
 func GenCurrTime(format string) string {
 	if len(format) == 0 {
@@ -24,20 +28,22 @@ func GenTimeByAdd(time time.Time, d time.Duration) string {
 	return time.Add(d).Format("2006-01-02 15:04:05")
 }
 
-func GenKey(appid string) string {
-	bf := bytes.Buffer{}
-	bf.WriteString(appid)
-	bf.WriteString(time.Now().String())
-	bf.WriteString(strconv.Itoa(rand.Int()))
-	return fmt.Sprintf("%x", sha256.Sum256(bf.Bytes()))[:32]
+func GenKey(_ string) string {
+	return hex.EncodeToString(mustReadCredentialRandomBytes(16))
 }
 
 func GenSecret() string {
-	bf := bytes.Buffer{}
-	for i := 0; i < 64; i++ {
-		bf.WriteByte(byte(rand.Int()))
+	// 24 bytes provide 192 bits of entropy and encode to exactly 32 URL-safe
+	// characters without padding or truncation.
+	return base64.RawURLEncoding.EncodeToString(mustReadCredentialRandomBytes(24))
+}
+
+func mustReadCredentialRandomBytes(length int) []byte {
+	data := make([]byte, length)
+	if _, err := io.ReadFull(credentialRandomReader, data); err != nil {
+		panic("secure credential random source failed")
 	}
-	return base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%x", sha256.Sum256(bf.Bytes()))))[:32]
+	return data
 }
 
 func GenAppId(num int) string {

@@ -16,7 +16,7 @@ from common.otlp.trace.langfuse import (
 )
 from common.otlp.trace.span import Span
 from common.otlp.trace.trace import Trace
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header
 from opentelemetry.trace import Status, StatusCode
 from pydantic import ConfigDict
 from starlette.responses import StreamingResponse
@@ -24,10 +24,13 @@ from starlette.types import Receive, Scope, Send
 
 from agent.api.schemas.workflow_agent_inputs import CustomCompletionInputs
 from agent.api.v1.base_api import CompletionBase
+from agent.infra.workflow_internal_auth import require_workflow_internal_api_key
 from agent.service.builder.workflow_agent_builder import WorkflowAgentRunnerBuilder
 from agent.service.runner.workflow_agent_runner import WorkflowAgentRunner
 
-workflow_agent_router = APIRouter()
+workflow_agent_router = APIRouter(
+    dependencies=[Depends(require_workflow_internal_api_key)],
+)
 
 headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 _STREAM_END = object()

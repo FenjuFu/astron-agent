@@ -2,6 +2,7 @@ package com.iflytek.astron.console.hub.service.gateway.impl;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
+import com.iflytek.astron.console.commons.security.TenantInternalApiKey;
 import com.iflytek.astron.console.hub.service.gateway.TenantGatewayAuthClient;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
@@ -26,21 +27,36 @@ public class HttpTenantGatewayAuthClient implements TenantGatewayAuthClient {
 
     private final OkHttpClient httpClient;
     private final String verifyAppAuthUrl;
+    private final String tenantInternalKey;
 
     @Autowired
-    public HttpTenantGatewayAuthClient(@Value("${tenant.verify-app-auth}") String verifyAppAuthUrl) {
-        this(new OkHttpClient(), verifyAppAuthUrl);
+    public HttpTenantGatewayAuthClient(
+            @Value("${tenant.verify-app-auth}") String verifyAppAuthUrl,
+            @Value("${api.url.apiSecret:}") String tenantInternalKey) {
+        this(new OkHttpClient(), verifyAppAuthUrl, tenantInternalKey);
     }
 
-    HttpTenantGatewayAuthClient(OkHttpClient httpClient, String verifyAppAuthUrl) {
+    HttpTenantGatewayAuthClient(
+            OkHttpClient httpClient, String verifyAppAuthUrl, String tenantInternalKey) {
         this.httpClient = httpClient;
         this.verifyAppAuthUrl = verifyAppAuthUrl;
+        this.tenantInternalKey = tenantInternalKey;
     }
 
     @Override
     public Optional<String> verify(String apiKey, String apiSecret) {
-        if (!StringUtils.hasText(verifyAppAuthUrl)) {
-            log.warn("tenant verify app auth url is empty");
+        if (!StringUtils.hasText(verifyAppAuthUrl)
+                || !StringUtils.hasText(apiKey)
+                || !StringUtils.hasText(apiSecret)) {
+            log.warn("Tenant application credential verification is not configured or incomplete");
+            return Optional.empty();
+        }
+        String configuredInternalKey;
+        try {
+            configuredInternalKey =
+                    TenantInternalApiKey.requireConfigured(tenantInternalKey);
+        } catch (IllegalStateException exception) {
+            log.warn("Tenant internal authentication is not configured; verification was not sent");
             return Optional.empty();
         }
 
@@ -50,6 +66,7 @@ public class HttpTenantGatewayAuthClient implements TenantGatewayAuthClient {
 
         Request request = new Request.Builder()
                 .url(verifyAppAuthUrl)
+                .header(TenantInternalApiKey.HEADER, configuredInternalKey)
                 .post(RequestBody.create(requestBody.toJSONString(), JSON_MEDIA_TYPE))
                 .build();
 
@@ -60,7 +77,9 @@ public class HttpTenantGatewayAuthClient implements TenantGatewayAuthClient {
             }
             return parseAppId(response.body());
         } catch (IOException | RuntimeException ex) {
-            log.warn("tenant verify app auth request error", ex);
+            log.warn(
+                    "Tenant application credential verification request failed: {}",
+                    ex.getClass().getSimpleName());
             return Optional.empty();
         }
     }

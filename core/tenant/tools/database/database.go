@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"tenant/config"
@@ -40,20 +41,7 @@ func NewDatabase(conf *config.Config) (*Database, error) {
 }
 
 func (db *Database) buildMysql(conf *config.Config) error {
-	if len(conf.DataBase.UserName) == 0 {
-		return errors.New("mysql username is empty")
-	}
-
-	if len(conf.DataBase.Password) == 0 {
-		return errors.New("mysql password is empty")
-	}
-
-	if len(conf.DataBase.Url) == 0 {
-		return errors.New("mysql url is empty")
-	}
-
-	dsn := fmt.Sprintf("%s:%s@tcp%s", conf.DataBase.UserName, conf.DataBase.Password, conf.DataBase.Url)
-	parsedDsn, err := mysql.ParseDSN(dsn)
+	dsn, parsedDsn, err := parseMysqlConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -68,17 +56,52 @@ func (db *Database) buildMysql(conf *config.Config) error {
 	}
 	client.SetMaxOpenConns(conf.DataBase.MaxOpenConns)
 	client.SetMaxIdleConns(conf.DataBase.MaxIdleConns)
-	err = client.Ping()
-	if err != nil {
+	if err := client.Ping(); err != nil {
 		return err
 	}
 
-	if err := runMigrations(client); err != nil {
+	if err := initializeMysqlClient(client, conf.TenantBootstrap); err != nil {
 		_ = client.Close()
 		return err
 	}
 
 	db.mysql = client
+	return nil
+}
+
+func parseMysqlConfig(conf *config.Config) (string, *mysql.Config, error) {
+	if len(conf.DataBase.UserName) == 0 {
+		return "", nil, errors.New("mysql username is empty")
+	}
+	if len(conf.DataBase.Password) == 0 {
+		return "", nil, errors.New("mysql password is empty")
+	}
+	if len(conf.DataBase.Url) == 0 {
+		return "", nil, errors.New("mysql url is empty")
+	}
+	if err := conf.TenantBootstrap.Validate(); err != nil {
+		return "", nil, fmt.Errorf("invalid tenant bootstrap credentials: %w", err)
+	}
+
+	dsn := fmt.Sprintf("%s:%s@tcp%s", conf.DataBase.UserName, conf.DataBase.Password, conf.DataBase.Url)
+	parsedDsn, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		return "", nil, err
+	}
+	return dsn, parsedDsn, nil
+}
+
+func initializeMysqlClient(
+	client *sql.DB,
+	credentials config.TenantBootstrapCredentials,
+) error {
+	if err := runMigrations(client); err != nil {
+		return err
+	}
+	if err := reconcileTenantBootstrap(client, credentials); err != nil {
+		return err
+	}
+	log.Printf("tenant bootstrap credentials reconciled")
 	return nil
 }
 

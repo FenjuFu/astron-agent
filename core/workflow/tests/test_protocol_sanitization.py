@@ -92,6 +92,29 @@ def test_sanitizer_handles_embedded_json_and_preserves_invalid_storage_text() ->
     assert sanitize_protocol(invalid) == invalid
 
 
+def test_sanitizer_removes_only_the_exact_disclosed_bootstrap_values() -> None:
+    legacy_key = "7b709739e8da44536127a333c7603a83"
+    legacy_secret = "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+    protocol = {
+        "apiKey": legacy_key,
+        "apiSecret": legacy_secret,
+        "customApiKey": "customer-key",
+        "embedded": json.dumps(
+            {"api_key": legacy_key, "api_secret": "customer-secret"}
+        ),
+    }
+
+    sanitized = sanitize_protocol(protocol)
+
+    assert sanitized["apiKey"] == ""
+    assert sanitized["apiSecret"] == ""
+    assert sanitized["customApiKey"] == "customer-key"
+    assert json.loads(sanitized["embedded"]) == {
+        "api_key": "",
+        "api_secret": "customer-secret",
+    }
+
+
 def test_runtime_document_sanitizer_fails_closed_for_invalid_json() -> None:
     assert sanitize_protocol_document_for_use('{"sandbox":') == {}
     assert sanitize_protocol_document_for_use('"not-a-protocol"') == {}

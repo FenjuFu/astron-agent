@@ -253,6 +253,19 @@ class KafkaConfig(BaseSettings):
         return v
 
 
+# The built-in LangChain/Pyodide executor is isolated by Deno and therefore does
+# not require an external service or user-provided credentials.  Keep the
+# resource defaults conservative so a fresh deployment can execute Code nodes
+# without exposing the workflow process to untrusted Python code.
+DEFAULT_CODE_EXECUTOR_TYPE = "langchain"
+DEFAULT_CODE_EXEC_TIMEOUT_SEC = 10
+MIN_CODE_EXEC_TIMEOUT_SEC = 1
+MAX_CODE_EXEC_TIMEOUT_SEC = 600
+DEFAULT_CODE_EXEC_MEMORY_LIMIT_MB = 256
+MIN_CODE_EXEC_MEMORY_LIMIT_MB = 128
+MAX_CODE_EXEC_MEMORY_LIMIT_MB = 2048
+
+
 class CodeExecutorConfig(BaseSettings):
     """
     Code executor configuration model.
@@ -260,11 +273,40 @@ class CodeExecutorConfig(BaseSettings):
 
     model_config = {"env_prefix": "", "case_sensitive": False}
 
-    exec_type: str = Field(default="disabled", alias="CODE_EXEC_TYPE")
+    exec_type: str = Field(default=DEFAULT_CODE_EXECUTOR_TYPE, alias="CODE_EXEC_TYPE")
     url: str = Field(default="", alias="CODE_EXEC_URL")
-    timeout: int = Field(default=10, alias="CODE_EXEC_TIMEOUT_SEC")
+    timeout: int = Field(
+        default=DEFAULT_CODE_EXEC_TIMEOUT_SEC, alias="CODE_EXEC_TIMEOUT_SEC"
+    )
+    memory_limit_mb: int = Field(
+        default=DEFAULT_CODE_EXEC_MEMORY_LIMIT_MB,
+        alias="CODE_EXEC_MEMORY_LIMIT_MB",
+    )
     api_key: str = Field(default="", alias="CODE_EXEC_API_KEY")
     api_secret: str = Field(default="", alias="CODE_EXEC_API_SECRET")
+
+    @field_validator("timeout")
+    @classmethod
+    def validate_timeout(cls, v: int) -> int:
+        """Keep code execution timeouts within the supported safe range."""
+        if not MIN_CODE_EXEC_TIMEOUT_SEC <= v <= MAX_CODE_EXEC_TIMEOUT_SEC:
+            raise ValueError(
+                "CODE_EXEC_TIMEOUT_SEC must be between "
+                f"{MIN_CODE_EXEC_TIMEOUT_SEC} and {MAX_CODE_EXEC_TIMEOUT_SEC} seconds"
+            )
+        return v
+
+    @field_validator("memory_limit_mb")
+    @classmethod
+    def validate_memory_limit_mb(cls, v: int) -> int:
+        """Keep the Pyodide V8 heap limit within a bounded range."""
+        if not MIN_CODE_EXEC_MEMORY_LIMIT_MB <= v <= MAX_CODE_EXEC_MEMORY_LIMIT_MB:
+            raise ValueError(
+                "CODE_EXEC_MEMORY_LIMIT_MB must be between "
+                f"{MIN_CODE_EXEC_MEMORY_LIMIT_MB} and "
+                f"{MAX_CODE_EXEC_MEMORY_LIMIT_MB} MB"
+            )
+        return v
 
     @model_validator(mode="after")
     def validator_url(self) -> "CodeExecutorConfig":

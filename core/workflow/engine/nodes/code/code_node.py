@@ -5,6 +5,7 @@ from typing import Any, Dict, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from workflow.configs.app_config import DEFAULT_CODE_EXECUTOR_TYPE
 from workflow.engine.entities.variable_pool import VariablePool
 from workflow.engine.nodes.base_node import BaseNode
 from workflow.engine.nodes.code.executor.base_executor import CodeExecutorFactory
@@ -35,9 +36,10 @@ if output is not None:
 
 ISOLATED_CODE_EXECUTOR_TYPES = frozenset({"ifly", "ifly-v2", "langchain"})
 ISOLATED_CODE_EXECUTOR_REQUIRED_ERROR = (
-    "No isolated code executor is configured. Enable the E2B sandbox or "
-    "configure CODE_EXEC_TYPE with an isolated executor. In-process local "
-    "execution is disabled."
+    "No isolated code executor is configured. Enable the E2B sandbox, keep the "
+    f"built-in {DEFAULT_CODE_EXECUTOR_TYPE} executor enabled, or configure "
+    "CODE_EXEC_TYPE with another isolated executor. In-process local execution "
+    "is disabled."
 )
 
 
@@ -116,6 +118,12 @@ class CodeNode(BaseNode):
                     code_result if isinstance(code_result, str) else str(code_result)
                 ),
             )
+        except CustomException as err:
+            # Preserve the executor's stable error code (for example, the
+            # timeout code) while keeping the detailed cause in internal
+            # tracing only.  The console maps these codes to controlled,
+            # localized messages before returning them to clients.
+            return self.fail(err, span)
         except Exception as err:
             return self.fail(
                 CustomException(CodeEnum.CODE_EXECUTION_ERROR, cause_error=err), span
@@ -170,7 +178,9 @@ class CodeNode(BaseNode):
         if sandbox_config is not None:
             return "e2b"
 
-        executor_type = os.getenv("CODE_EXEC_TYPE", "disabled").strip().lower()
+        executor_type = (
+            os.getenv("CODE_EXEC_TYPE", DEFAULT_CODE_EXECUTOR_TYPE).strip().lower()
+        )
         if executor_type not in ISOLATED_CODE_EXECUTOR_TYPES:
             raise CustomException(
                 CodeEnum.CODE_EXECUTION_ERROR,
