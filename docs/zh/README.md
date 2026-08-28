@@ -183,6 +183,8 @@ npm run docs:build
   <img src="../star-history.svg" alt="Star 历史图表" width="600">
 </div>
 
+> 此自托管图表根据 GitHub `stargazers_count` 的月度快照重新生成。历史点保存在 `star-history.json` 中，用户之后取消或重新 Star 时不会重算过去的数据。
+
 ## 📞 支持
 
 - 💬 社区讨论: [GitHub Discussions](https://github.com/iflytek/astron-agent/discussions)
