@@ -133,7 +133,7 @@ docker compose -f docker-compose-with-auth.yaml up -d
 - 👥 WeChat Work グループ:
 
 <div align="center">
-  <img src="./imgs/WeCom_Group.png" alt="WeChat Work グループ" width="300">
+  <img src="../imgs/WeCom_Group.png" alt="WeChat Work グループ" width="300">
 </div>
 
 ## 📄 オープンソースライセンス
