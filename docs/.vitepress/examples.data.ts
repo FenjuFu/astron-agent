@@ -1,6 +1,6 @@
 // Build-time data loader: reads the community workflow examples under examples/
 // and exposes their metadata to the docs site gallery.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
 export interface ExampleMeta {
@@ -15,16 +15,11 @@ export interface ExampleMeta {
   event: string;
   repoPath: string; // e.g. examples/history-knowledge-qa
   hasPreview: boolean;
-  previewUrl: string;
+  previewPath: string;
 }
 
 declare const data: ExampleMeta[];
 export { data };
-
-const previewAssets = import.meta.glob("../../examples/*/preview.png", {
-  eager: true,
-  import: "default"
-}) as Record<string, string>;
 
 function parseFrontmatter(md: string): Record<string, string | string[]> | null {
   const m = md.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -64,6 +59,8 @@ export default {
       if (id === "TEMPLATE") continue;
       const fm = parseFrontmatter(readFileSync(file, "utf8"));
       if (!fm || !fm.id) continue;
+      const previewPath = `${dirname(file)}/preview.png`;
+      const hasPreview = existsSync(previewPath);
       examples.push({
         id: String(fm.id),
         title: String(fm.title ?? fm.id),
@@ -75,8 +72,8 @@ export default {
         dslVersion: String(fm.dslVersion ?? ""),
         event: String(fm.event ?? ""),
         repoPath: `examples/${id}`,
-        hasPreview: Boolean(previewAssets[`../../examples/${id}/preview.png`]),
-        previewUrl: previewAssets[`../../examples/${id}/preview.png`] ?? ""
+        hasPreview,
+        previewPath: hasPreview ? `examples/${id}/preview.png` : ""
       });
     }
     return examples.sort((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title));
