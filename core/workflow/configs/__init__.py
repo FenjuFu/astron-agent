@@ -2,11 +2,84 @@ import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from loguru import logger
 
-from workflow.configs.app_config import WorkflowConfig
+from workflow.configs.app_config import DEFAULT_CODE_EXECUTOR_TYPE, WorkflowConfig
 from workflow.consts.config_env import EnvStrategy
+
+LEGACY_CODE_EXECUTOR_DEFAULT_COMMENTS = (
+    # Directly previous releases shipped this header.
+    "supported fallback types: disabled, ifly, ifly-v2, langchain (default: disabled)",
+    # Keep compatibility with the earlier security release as well.
+    "supported types: disabled, ifly, ifly-v2, langchain, e2b (default: disabled)",
+)
+
+
+def _read_simple_env_values(env_file: Path, keys: set[str]) -> dict[str, str]:
+    """Read the small set of deployment settings needed before dotenv loading.
+
+    ``load_dotenv`` intentionally keeps existing process variables authoritative.
+    We need to inspect the mounted workflow config once before loading it so that
+    an untouched config from the pre-Pyodide release can be migrated safely.  A
+    non-interpolating read through python-dotenv keeps the compatibility check
+    consistent with the actual load below (including quoting and comments).
+    """
+    try:
+        parsed_values = dotenv_values(
+            dotenv_path=env_file, interpolate=False, encoding="utf-8"
+        )
+    except (OSError, UnicodeError, ValueError):
+        return {}
+
+    return {key: value for key in keys if (value := parsed_values.get(key)) is not None}
+
+
+def _has_legacy_code_executor_signature(env_file: Path) -> bool:
+    """Return whether *env_file* has the historical generated-default header."""
+    try:
+        content = env_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    normalized_content = " ".join(content.lower().split())
+    return any(
+        signature in normalized_content
+        for signature in LEGACY_CODE_EXECUTOR_DEFAULT_COMMENTS
+    )
+
+
+def _migrate_legacy_code_executor_default(env_file: Path) -> None:
+    """Keep upgrades from the old disabled template zero-configuration.
+
+    Before the built-in Pyodide sandbox became the default, the generated
+    workflow config contained ``CODE_EXEC_TYPE=disabled`` and had no memory
+    limit setting.  Compose deliberately preserves user-mounted config files,
+    so an upgrade would otherwise keep that historical default forever and a
+    fresh Code node would fail even though the new image contains the isolated
+    executor.  Treat only that recognizable, unversioned template as a legacy
+    default.  The historical header is required as an additional fingerprint
+    so a customized config that explicitly sets ``disabled`` is not silently
+    changed.  An explicit process-level ``CODE_EXEC_TYPE`` (including
+    ``disabled``) always wins and remains fail-closed.
+    """
+    if "CODE_EXEC_TYPE" in os.environ:
+        return
+
+    values = _read_simple_env_values(
+        env_file, {"CODE_EXEC_TYPE", "CODE_EXEC_MEMORY_LIMIT_MB"}
+    )
+    if (
+        values.get("CODE_EXEC_TYPE", "").strip().lower() == "disabled"
+        and "CODE_EXEC_MEMORY_LIMIT_MB" not in values
+        and _has_legacy_code_executor_signature(env_file)
+    ):
+        os.environ["CODE_EXEC_TYPE"] = DEFAULT_CODE_EXECUTOR_TYPE
+        logger.warning(
+            "Migrating the legacy workflow code executor default from disabled "
+            "to the built-in isolated LangChain/Pyodide sandbox. Set "
+            "CODE_EXEC_TYPE=disabled as a process environment variable to "
+            "explicitly disable Code nodes."
+        )
 
 
 class EnvLoader(ABC):
@@ -39,6 +112,12 @@ class LocalLoader(EnvLoader):
         :raises ValueError: If no configuration file is found
         """
         if os.path.exists(self.env_file):
+            # Compose may deliberately pass an empty optional override from
+            # ``.env``.  Treat an empty value as unset so the mounted workflow
+            # config can still supply its defaults.
+            if not os.getenv("CODE_EXEC_TYPE", "").strip():
+                os.environ.pop("CODE_EXEC_TYPE", None)
+            _migrate_legacy_code_executor_default(self.env_file)
             load_dotenv(self.env_file, override=False)
             logger.debug("Using config.env file.")
         else:

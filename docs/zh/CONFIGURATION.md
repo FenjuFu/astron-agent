@@ -278,6 +278,11 @@
 不是必需配置；工作流启用 E2B 后才会优先使用 E2B。用户代码不会在
 `core-workflow` 进程内执行，`local` 执行器不再支持。
 
+升级提示：如果保留了旧版本自动生成的 `config.env`（其中
+`CODE_EXEC_TYPE=disabled` 且没有 `CODE_EXEC_MEMORY_LIMIT_MB`），Workflow
+会在启动时将这个历史默认值迁移为内置沙箱，因此无需手动修改配置。若要
+明确禁用代码节点，请在容器进程环境中设置 `CODE_EXEC_TYPE=disabled`。
+
 ---
 
 ## 12. Console 模块配置

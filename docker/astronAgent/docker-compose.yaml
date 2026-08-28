@@ -676,6 +676,9 @@ services:
     container_name: astron-agent-core-workflow
     environment:
       RUNTIME_ENV: "${RUNTIME_ENV:-dev}"
+      # Optional process-level override. Leave empty to use the built-in
+      # LangChain/Pyodide default from config/workflow/config.env.
+      CODE_EXEC_TYPE: "${CODE_EXEC_TYPE:-}"
       WORKFLOW_INTERNAL_API_KEY_FILE: "/app/secrets/workflow/workflow-internal-api-key"
       TENANT_ID: "680ab54f"
       TENANT_KEY_FILE: "/app/secrets/tenant/tenant-key"
