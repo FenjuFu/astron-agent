@@ -90,63 +90,61 @@ func TestLoadTenantBootstrapCredentialsPrefersDirectValues(t *testing.T) {
 	}
 }
 
-func TestLoadTenantBootstrapCredentialsRejectsUnsafeFiles(t *testing.T) {
-	t.Run("symbolic link", func(t *testing.T) {
-		clearTenantBootstrapEnvironment(t)
-		directory := t.TempDir()
-		target := filepath.Join(directory, "target")
-		link := filepath.Join(directory, "tenant-key")
-		secretFile := filepath.Join(directory, "tenant-secret")
-		if err := os.WriteFile(target, []byte(strings.Repeat("k", 48)), 0o400); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(target, link); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(secretFile, []byte(strings.Repeat("s", 48)), 0o400); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("TENANT_KEY_FILE", link)
-		t.Setenv("TENANT_SECRET_FILE", secretFile)
+func TestLoadTenantBootstrapCredentialsRejectsSymbolicLink(t *testing.T) {
+	clearTenantBootstrapEnvironment(t)
+	directory := t.TempDir()
+	target := filepath.Join(directory, "target")
+	link := filepath.Join(directory, "tenant-key")
+	secretFile := filepath.Join(directory, "tenant-secret")
+	if err := os.WriteFile(target, []byte(strings.Repeat("k", 48)), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretFile, []byte(strings.Repeat("s", 48)), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TENANT_KEY_FILE", link)
+	t.Setenv("TENANT_SECRET_FILE", secretFile)
 
-		if _, err := LoadTenantBootstrapCredentials(); err == nil || !strings.Contains(err.Error(), "non-symbolic-link") {
-			t.Fatalf("LoadTenantBootstrapCredentials() error = %v, want symbolic-link rejection", err)
-		}
-	})
+	if _, err := LoadTenantBootstrapCredentials(); err == nil || !strings.Contains(err.Error(), "non-symbolic-link") {
+		t.Fatalf("LoadTenantBootstrapCredentials() error = %v, want symbolic-link rejection", err)
+	}
+}
 
-	t.Run("oversized", func(t *testing.T) {
-		clearTenantBootstrapEnvironment(t)
-		directory := t.TempDir()
-		keyFile := filepath.Join(directory, "tenant-key")
-		secretFile := filepath.Join(directory, "tenant-secret")
-		if err := os.WriteFile(keyFile, []byte(strings.Repeat("k", maxCredentialFileBytes+1)), 0o400); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(secretFile, []byte(strings.Repeat("s", 48)), 0o400); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("TENANT_KEY_FILE", keyFile)
-		t.Setenv("TENANT_SECRET_FILE", secretFile)
+func TestLoadTenantBootstrapCredentialsRejectsOversizedFile(t *testing.T) {
+	clearTenantBootstrapEnvironment(t)
+	directory := t.TempDir()
+	keyFile := filepath.Join(directory, "tenant-key")
+	secretFile := filepath.Join(directory, "tenant-secret")
+	if err := os.WriteFile(keyFile, []byte(strings.Repeat("k", maxCredentialFileBytes+1)), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretFile, []byte(strings.Repeat("s", 48)), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TENANT_KEY_FILE", keyFile)
+	t.Setenv("TENANT_SECRET_FILE", secretFile)
 
-		if _, err := LoadTenantBootstrapCredentials(); err == nil || !strings.Contains(err.Error(), "too large") {
-			t.Fatalf("LoadTenantBootstrapCredentials() error = %v, want size rejection", err)
-		}
-	})
+	if _, err := LoadTenantBootstrapCredentials(); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("LoadTenantBootstrapCredentials() error = %v, want size rejection", err)
+	}
+}
 
-	t.Run("directory", func(t *testing.T) {
-		clearTenantBootstrapEnvironment(t)
-		directory := t.TempDir()
-		secretFile := filepath.Join(directory, "tenant-secret")
-		if err := os.WriteFile(secretFile, []byte(strings.Repeat("s", 48)), 0o400); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("TENANT_KEY_FILE", directory)
-		t.Setenv("TENANT_SECRET_FILE", secretFile)
+func TestLoadTenantBootstrapCredentialsRejectsDirectory(t *testing.T) {
+	clearTenantBootstrapEnvironment(t)
+	directory := t.TempDir()
+	secretFile := filepath.Join(directory, "tenant-secret")
+	if err := os.WriteFile(secretFile, []byte(strings.Repeat("s", 48)), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TENANT_KEY_FILE", directory)
+	t.Setenv("TENANT_SECRET_FILE", secretFile)
 
-		if _, err := LoadTenantBootstrapCredentials(); err == nil || !strings.Contains(err.Error(), "regular") {
-			t.Fatalf("LoadTenantBootstrapCredentials() error = %v, want directory rejection", err)
-		}
-	})
+	if _, err := LoadTenantBootstrapCredentials(); err == nil || !strings.Contains(err.Error(), "regular") {
+		t.Fatalf("LoadTenantBootstrapCredentials() error = %v, want directory rejection", err)
+	}
 }
 
 func TestTenantBootstrapCredentialsValidate(t *testing.T) {

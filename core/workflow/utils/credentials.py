@@ -1,11 +1,29 @@
 """Small, fail-closed helpers for deployment-managed credential files."""
 
+import hashlib
+import hmac
 import os
 import stat
 from typing import Collection
 
 MAX_CREDENTIAL_FILE_BYTES = 4096
 TENANT_INTERNAL_API_KEY_HEADER = "X-Tenant-Internal-Key"
+
+# Cache keys must be deterministic so that all Workflow replicas can reuse a
+# verification result, but they must not be a plain fast hash of an API secret.
+# A domain-separated HMAC keeps the cache namespace opaque and avoids treating
+# the credential as a password hash.  This key is intentionally versioned: the
+# cache prefix is bumped alongside it so old SHA-256 entries cannot be reused.
+_CREDENTIAL_CACHE_KEY_CONTEXT = b"astron-agent:workflow:credential-cache:v3"
+
+
+def credential_cache_key(credential: str) -> str:
+    """Return the deterministic, versioned digest used for credential caches."""
+    return hmac.new(
+        _CREDENTIAL_CACHE_KEY_CONTEXT,
+        credential.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def read_credential_file(file_name: str) -> str:

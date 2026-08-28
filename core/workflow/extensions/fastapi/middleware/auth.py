@@ -26,6 +26,7 @@ from workflow.extensions.otlp.trace.span import Span
 from workflow.utils.credentials import (
     MAX_CREDENTIAL_FILE_BYTES,
     TENANT_INTERNAL_API_KEY_HEADER,
+    credential_cache_key,
     credential_from_env_or_file,
 )
 
@@ -38,7 +39,7 @@ WORKFLOW_INTERNAL_API_KEY_MAX_FILE_BYTES = MAX_CREDENTIAL_FILE_BYTES
 WORKFLOW_GATEWAY_TIMESTAMP_HEADER = "X-Workflow-Gateway-Timestamp"
 WORKFLOW_GATEWAY_SIGNATURE_HEADER = "X-Workflow-Gateway-Signature"
 WORKFLOW_GATEWAY_SIGNATURE_MAX_AGE_SECONDS = 60
-VERIFIED_CREDENTIAL_CACHE_PREFIX = "workflow:app:verified_credential:v2"
+VERIFIED_CREDENTIAL_CACHE_PREFIX = "workflow:app:verified_credential:v3"
 APP_MANAGE_CREDENTIAL_MIN_LENGTH = 32
 APP_MANAGE_CREDENTIAL_MAX_LENGTH = 50
 PUBLISHED_LEGACY_TENANT_API_KEY = "7b709739e8da44536127a333c7603a83"
@@ -272,12 +273,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 err_msg="authorization header is invalid",
             )
 
-        credential_cache_key = hashlib.sha256(
-            credential.strip().encode("utf-8")
-        ).hexdigest()
+        credential_cache_digest = credential_cache_key(credential.strip())
 
         app_id = await asyncio.to_thread(
-            self._get_app_id_with_cache, credential_cache_key
+            self._get_app_id_with_cache, credential_cache_digest
         )
         if app_id:
             return app_id
@@ -326,7 +325,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 cause_error=json.dumps(resp.json(), ensure_ascii=False),
             )
         await asyncio.to_thread(
-            self._set_app_id_with_cache, credential_cache_key, app_id
+            self._set_app_id_with_cache, credential_cache_digest, app_id
         )
         return app_id
 
@@ -334,7 +333,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         Get the app id with cache
 
-        :param credential_cache_key: SHA-256 digest of the complete credential pair
+        :param credential_cache_key: HMAC-SHA256 digest of the complete credential pair
         :return: The app id
         """
         cache_service = get_cache_service()
@@ -347,7 +346,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         Set the app id with cache
 
-        :param credential_cache_key: SHA-256 digest of the complete credential pair
+        :param credential_cache_key: HMAC-SHA256 digest of the complete credential pair
         :param app_id: The app id
         """
         cache_service = get_cache_service()

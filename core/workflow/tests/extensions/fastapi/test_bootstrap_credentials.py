@@ -1,4 +1,3 @@
-import hashlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -24,6 +23,7 @@ from workflow.extensions.fastapi.lifespan.bootstrap_credentials import (
     synchronize_bootstrap_app,
     synchronize_deployment_bootstrap_app,
 )
+from workflow.utils.credentials import credential_cache_key
 
 
 @pytest.fixture
@@ -176,8 +176,9 @@ def test_second_rotation_revokes_old_digest_only_after_commit(
 
     synchronize_deployment_bootstrap_app(credentials())
 
-    old_digest = hashlib.sha256(f"{old_key}:{old_secret}".encode()).hexdigest()
-    assert f"workflow:app:verified_credential:v2:{old_digest}" in cache.deleted
+    old_digest = credential_cache_key(f"{old_key}:{old_secret}")
+    assert f"workflow:app:verified_credential:v3:{old_digest}" in cache.deleted
+    assert "workflow:app:verified_credential:v2:old-entry" in cache.deleted
     with Session(engine) as session:
         app = session.get(App, 1)
         assert app is not None
@@ -274,11 +275,18 @@ class _RecordingCache:
         self.deleted: list[str] = []
 
     def scan_keys(self, pattern: str) -> list[str]:
-        assert pattern == "workflow:flow_info:v2:*"
-        return [
-            "workflow:flow_info:v2:1",
-            "workflow:flow_info:v2:1:latest",
-        ]
+        if pattern == bootstrap_module._LEGACY_VERIFIED_CACHE_PATTERN:
+            return [
+                "workflow:app:verified_credential:8f36ac6b8a917de90c78ca6828908790c0f0df33a319e3b793a35e2dc988f18f"
+            ]
+        if pattern == bootstrap_module._PREVIOUS_VERIFIED_CACHE_PATTERN:
+            return ["workflow:app:verified_credential:v2:old-entry"]
+        if pattern == "workflow:flow_info:v2:*":
+            return [
+                "workflow:flow_info:v2:1",
+                "workflow:flow_info:v2:1:latest",
+            ]
+        raise AssertionError(f"unexpected cache scan pattern: {pattern}")
 
     def delete(self, key: str) -> None:
         self.deleted.append(key)
@@ -295,6 +303,9 @@ def test_invalidate_legacy_bootstrap_caches_revokes_all_old_namespaces(
     assert "workflow:app_info:680ab54f" in cache.deleted
     assert "workflow:app_info:v2:680ab54f" in cache.deleted
     assert "workflow:app:api_key:7b709739e8da44536127a333c7603a83" in cache.deleted
+    legacy_digest = credential_cache_key(f"{LEGACY_TENANT_KEY}:{LEGACY_TENANT_SECRET}")
+    assert f"workflow:app:verified_credential:v3:{legacy_digest}" in cache.deleted
+    assert "workflow:app:verified_credential:v2:old-entry" in cache.deleted
     assert "workflow:flow_info:v2:1" in cache.deleted
     assert "workflow:flow_info:v2:1:latest" in cache.deleted
     assert any(

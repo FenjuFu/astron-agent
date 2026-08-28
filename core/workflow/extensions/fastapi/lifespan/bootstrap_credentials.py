@@ -1,6 +1,5 @@
 """Synchronize the deployment-managed tenant identity into Workflow storage."""
 
-import hashlib
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,13 +11,22 @@ from workflow.domain.models.ai_app import App
 from workflow.domain.models.app_source import AppSource
 from workflow.extensions.middleware.database.utils import session_getter
 from workflow.extensions.middleware.getters import get_cache_service
-from workflow.utils.credentials import credential_from_env_or_file
+from workflow.utils.credentials import credential_cache_key, credential_from_env_or_file
 
 BOOTSTRAP_TENANT_ID = "680ab54f"
 LEGACY_TENANT_KEY = "7b709739e8da44536127a333c7603a83"
 LEGACY_TENANT_SECRET = "NjhmY2NmM2NkZDE4MDFlNmM5ZjcyZjMy"
+# SHA-256 of the published legacy pair.  Keep this non-secret fingerprint so
+# upgrades can remove the exact v1 key even if a Redis deployment does not
+# return it from the broad namespace scan below.
+_LEGACY_VERIFIED_CACHE_DIGEST = (
+    "8f36ac6b8a917de90c78ca6828908790c0f0df33a319e3b793a35e2dc988f18f"
+)
 _LEGACY_VERIFIED_CACHE_PREFIX = "workflow:app:verified_credential"
-_CURRENT_VERIFIED_CACHE_PREFIX = "workflow:app:verified_credential:v2"
+_PREVIOUS_VERIFIED_CACHE_PREFIX = "workflow:app:verified_credential:v2"
+_CURRENT_VERIFIED_CACHE_PREFIX = "workflow:app:verified_credential:v3"
+_LEGACY_VERIFIED_CACHE_PATTERN = f"{_LEGACY_VERIFIED_CACHE_PREFIX}:[0-9a-f]*"
+_PREVIOUS_VERIFIED_CACHE_PATTERN = f"{_PREVIOUS_VERIFIED_CACHE_PREFIX}:*"
 _OLDEST_API_KEY_CACHE_PREFIX = "workflow:app:api_key"
 _LEGACY_APP_INFO_CACHE_PREFIX = "workflow:app_info"
 _CURRENT_APP_INFO_CACHE_PREFIX = "workflow:app_info:v2"
@@ -135,9 +143,7 @@ def synchronize_bootstrap_app(
         and all(existing_pair)
     ):
         credential_digests_to_revoke.add(
-            hashlib.sha256(
-                f"{existing_pair[0]}:{existing_pair[1]}".encode()
-            ).hexdigest()
+            credential_cache_key(f"{existing_pair[0]}:{existing_pair[1]}")
         )
     # This row is deployment-owned once all reserved identity fields match.
     # Always converge it to the Secret so explicit rotations and regenerated
@@ -153,12 +159,10 @@ def invalidate_legacy_bootstrap_caches(
 ) -> None:
     """Revoke disclosed authentication entries and abandon secret-bearing flow caches."""
     cache_service = get_cache_service()
-    legacy_digest = hashlib.sha256(
-        f"{LEGACY_TENANT_KEY}:{LEGACY_TENANT_SECRET}".encode("utf-8")
-    ).hexdigest()
+    legacy_digest = credential_cache_key(f"{LEGACY_TENANT_KEY}:{LEGACY_TENANT_SECRET}")
     keys = {
         f"{_OLDEST_API_KEY_CACHE_PREFIX}:{LEGACY_TENANT_KEY}",
-        f"{_LEGACY_VERIFIED_CACHE_PREFIX}:{legacy_digest}",
+        f"{_LEGACY_VERIFIED_CACHE_PREFIX}:{_LEGACY_VERIFIED_CACHE_DIGEST}",
         f"{_CURRENT_VERIFIED_CACHE_PREFIX}:{legacy_digest}",
         f"{_LEGACY_APP_INFO_CACHE_PREFIX}:{credentials.tenant_id}",
         f"{_CURRENT_APP_INFO_CACHE_PREFIX}:{credentials.tenant_id}",
@@ -167,6 +171,11 @@ def invalidate_legacy_bootstrap_caches(
         f"{_CURRENT_VERIFIED_CACHE_PREFIX}:{digest}"
         for digest in credential_digests_to_revoke or ()
     )
+    # The v1/v2 cache keys were derived with a fast SHA-256 digest.  They are
+    # no longer accepted by the middleware, but remove them during startup so
+    # stale positive authentication entries cannot survive an upgrade.
+    keys.update(cache_service.scan_keys(_LEGACY_VERIFIED_CACHE_PATTERN))
+    keys.update(cache_service.scan_keys(_PREVIOUS_VERIFIED_CACHE_PATTERN))
     keys.update(cache_service.scan_keys(_LEGACY_FLOW_CACHE_PATTERN))
     for key in keys:
         cache_service.delete(key)

@@ -88,6 +88,32 @@ func reconcileTenantBootstrapTransaction(
 	}
 
 	now := time.Now().Format("2006-01-02 15:04:05")
+	if err := ensureAndLockTenantBootstrapApp(ctx, transaction, credentials, now); err != nil {
+		return err
+	}
+
+	adoptExistingUnmanagedCredential, err := findTenantBootstrapCredential(
+		ctx,
+		transaction,
+		credentials,
+	)
+	if err != nil {
+		return err
+	}
+	if adoptExistingUnmanagedCredential {
+		if err := adoptTenantBootstrapCredential(ctx, transaction, credentials, now); err != nil {
+			return err
+		}
+	}
+	return rotateTenantBootstrapCredentials(ctx, transaction, credentials, now)
+}
+
+func ensureAndLockTenantBootstrapApp(
+	ctx context.Context,
+	transaction bootstrapTransaction,
+	credentials config.TenantBootstrapCredentials,
+	now string,
+) error {
 	if _, err := transaction.ExecContext(
 		ctx,
 		`INSERT IGNORE INTO tb_app
@@ -127,7 +153,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		!lockedAppDeleted.Valid || lockedAppDeleted.Bool {
 		return errors.New("reserved tenant bootstrap app is disabled or deleted")
 	}
+	return nil
+}
 
+func findTenantBootstrapCredential(
+	ctx context.Context,
+	transaction bootstrapTransaction,
+	credentials config.TenantBootstrapCredentials,
+) (bool, error) {
 	var collisionOwner string
 	err := transaction.QueryRowContext(
 		ctx,
@@ -139,10 +172,10 @@ LIMIT 1 FOR UPDATE`,
 		credentials.TenantID,
 	).Scan(&collisionOwner)
 	if err == nil {
-		return errors.New("tenant bootstrap API key is already assigned to another active app")
+		return false, errors.New("tenant bootstrap API key is already assigned to another active app")
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("check tenant bootstrap API key ownership failed: %w", err)
+		return false, fmt.Errorf("check tenant bootstrap API key ownership failed: %w", err)
 	}
 
 	var unmanagedSecret sql.NullString
@@ -157,39 +190,53 @@ LIMIT 1 FOR UPDATE`,
 		credentials.APIKey,
 		tenantBootstrapManagedMarker,
 	).Scan(&unmanagedSecret, &unmanagedIsDelete)
-	adoptExistingUnmanagedCredential := false
 	if err == nil {
 		if !unmanagedSecret.Valid || !unmanagedIsDelete.Valid || unmanagedIsDelete.Bool ||
 			subtle.ConstantTimeCompare([]byte(unmanagedSecret.String), []byte(credentials.Secret)) != 1 {
-			return errors.New("tenant bootstrap API key conflicts with an unmanaged credential")
+			return false, errors.New("tenant bootstrap API key conflicts with an unmanaged credential")
 		}
-		// A strong pair explicitly configured by the deployment may already have
-		// been created through Tenant's public API on an older release. Because it
-		// belongs to the reserved app and exactly matches the current deployment
-		// Secret, adopt it into managed ownership so a later rotation can retire it.
-		adoptExistingUnmanagedCredential = true
+		return true, nil
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("check tenant bootstrap managed credential failed: %w", err)
+		return false, fmt.Errorf("check tenant bootstrap managed credential failed: %w", err)
 	}
-	if adoptExistingUnmanagedCredential {
-		if _, err := transaction.ExecContext(
-			ctx,
-			`UPDATE tb_auth
+	return false, nil
+}
+
+func adoptTenantBootstrapCredential(
+	ctx context.Context,
+	transaction bootstrapTransaction,
+	credentials config.TenantBootstrapCredentials,
+	now string,
+) error {
+	// A strong pair explicitly configured by the deployment may already have
+	// been created through Tenant's public API on an older release. Because it
+	// belongs to the reserved app and exactly matches the current deployment
+	// Secret, adopt it into managed ownership so a later rotation can retire it.
+	if _, err := transaction.ExecContext(
+		ctx,
+		`UPDATE tb_auth
 SET extend = ?, update_time = ?
 WHERE app_id = ? AND api_key = ? AND api_secret = ? AND is_delete = 0
   AND COALESCE(extend, '') <> ?`,
-			tenantBootstrapManagedMarker,
-			now,
-			credentials.TenantID,
-			credentials.APIKey,
-			credentials.Secret,
-			tenantBootstrapManagedMarker,
-		); err != nil {
-			return fmt.Errorf("adopt tenant bootstrap credential failed: %w", err)
-		}
+		tenantBootstrapManagedMarker,
+		now,
+		credentials.TenantID,
+		credentials.APIKey,
+		credentials.Secret,
+		tenantBootstrapManagedMarker,
+	); err != nil {
+		return fmt.Errorf("adopt tenant bootstrap credential failed: %w", err)
 	}
+	return nil
+}
 
+func rotateTenantBootstrapCredentials(
+	ctx context.Context,
+	transaction bootstrapTransaction,
+	credentials config.TenantBootstrapCredentials,
+	now string,
+) error {
 	if _, err := transaction.ExecContext(
 		ctx,
 		`UPDATE tb_auth

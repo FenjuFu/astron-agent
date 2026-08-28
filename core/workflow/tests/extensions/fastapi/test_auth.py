@@ -25,6 +25,7 @@ from workflow.extensions.fastapi.base import (
     JSONResponseBase,
 )
 from workflow.extensions.fastapi.middleware.auth import (
+    VERIFIED_CREDENTIAL_CACHE_PREFIX,
     WORKFLOW_GATEWAY_SIGNATURE_HEADER,
     WORKFLOW_GATEWAY_TIMESTAMP_HEADER,
     WORKFLOW_INTERNAL_API_KEY_ENV,
@@ -32,12 +33,15 @@ from workflow.extensions.fastapi.middleware.auth import (
     AuthMiddleware,
 )
 from workflow.utils.credentials import TENANT_INTERNAL_API_KEY_HEADER
+from workflow.utils.credentials import (
+    credential_cache_key as build_credential_cache_key,
+)
 
 pytestmark = pytest.mark.asyncio
 
 
 def credential_cache_key(credential: str) -> str:
-    return hashlib.sha256(credential.encode("utf-8")).hexdigest()
+    return build_credential_cache_key(credential)
 
 
 def gateway_signature(
@@ -445,7 +449,7 @@ class TestAuthMiddleware:
             "workflow.extensions.fastapi.middleware.auth.get_cache_service"
         ) as mock_get_cache:
             mock_cache = {
-                "workflow:app:verified_credential:v2:test_digest": "cached_app_id"
+                f"{VERIFIED_CREDENTIAL_CACHE_PREFIX}:test_digest": "cached_app_id"
             }
             mock_get_cache.return_value = mock_cache
 
@@ -464,7 +468,7 @@ class TestAuthMiddleware:
             auth_middleware._set_app_id_with_cache("test_digest", "test_app_id")
 
             assert (
-                mock_cache["workflow:app:verified_credential:v2:test_digest"]
+                mock_cache[f"{VERIFIED_CREDENTIAL_CACHE_PREFIX}:test_digest"]
                 == "test_app_id"
             )
 

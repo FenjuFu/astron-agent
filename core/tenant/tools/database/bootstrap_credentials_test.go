@@ -67,29 +67,50 @@ func (row fakeBootstrapRow) Scan(dest ...any) error {
 		return errors.New("unexpected scan destination count")
 	}
 	for index, destination := range dest {
-		switch target := destination.(type) {
-		case *string:
-			value, ok := values[index].(string)
-			if !ok {
-				return errors.New("unexpected string scan value")
-			}
-			*target = value
-		case *sql.NullString:
-			value, ok := values[index].(string)
-			if !ok {
-				return errors.New("unexpected nullable string scan value")
-			}
-			*target = sql.NullString{String: value, Valid: true}
-		case *sql.NullBool:
-			value, ok := values[index].(bool)
-			if !ok {
-				return errors.New("unexpected nullable bool scan value")
-			}
-			*target = sql.NullBool{Bool: value, Valid: true}
-		default:
-			return errors.New("unexpected scan destination type")
+		if err := assignFakeBootstrapValue(values[index], destination); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+func assignFakeBootstrapValue(value any, destination any) error {
+	switch target := destination.(type) {
+	case *string:
+		return assignFakeString(target, value)
+	case *sql.NullString:
+		return assignFakeNullString(target, value)
+	case *sql.NullBool:
+		return assignFakeNullBool(target, value)
+	default:
+		return errors.New("unexpected scan destination type")
+	}
+}
+
+func assignFakeString(target *string, value any) error {
+	text, ok := value.(string)
+	if !ok {
+		return errors.New("unexpected string scan value")
+	}
+	*target = text
+	return nil
+}
+
+func assignFakeNullString(target *sql.NullString, value any) error {
+	text, ok := value.(string)
+	if !ok {
+		return errors.New("unexpected nullable string scan value")
+	}
+	*target = sql.NullString{String: text, Valid: true}
+	return nil
+}
+
+func assignFakeNullBool(target *sql.NullBool, value any) error {
+	boolean, ok := value.(bool)
+	if !ok {
+		return errors.New("unexpected nullable bool scan value")
+	}
+	*target = sql.NullBool{Bool: boolean, Valid: true}
 	return nil
 }
 
@@ -111,6 +132,62 @@ func testBootstrapCredentials() config.TenantBootstrapCredentials {
 	}
 }
 
+func assertBootstrapQueriesDoNotInterpolateCredentials(
+	t *testing.T,
+	executions []recordedBootstrapExecution,
+	credentials config.TenantBootstrapCredentials,
+) {
+	t.Helper()
+	for _, execution := range executions {
+		if strings.Contains(execution.query, credentials.APIKey) ||
+			strings.Contains(execution.query, credentials.Secret) ||
+			strings.Contains(execution.query, config.LegacyTenantKey) ||
+			strings.Contains(execution.query, config.LegacyTenantSecret) {
+			t.Fatal("credential value was interpolated into SQL instead of passed as a parameter")
+		}
+	}
+}
+
+func assertLegacyCredentialRevocation(
+	t *testing.T,
+	execution recordedBootstrapExecution,
+) {
+	t.Helper()
+	if strings.Contains(execution.query, "app_id") {
+		t.Fatal("published legacy credential revocation must apply globally, not only to the reserved app")
+	}
+	if execution.args[1] != config.LegacyTenantKey || execution.args[2] != config.LegacyTenantSecret {
+		t.Fatalf("legacy disable arguments = %#v, want exact published pair", execution.args)
+	}
+}
+
+func assertManagedCredentialRetirement(
+	t *testing.T,
+	execution recordedBootstrapExecution,
+	credentials config.TenantBootstrapCredentials,
+) {
+	t.Helper()
+	if execution.args[1] != config.BootstrapTenantID ||
+		execution.args[2] != tenantBootstrapManagedMarker ||
+		execution.args[3] != credentials.APIKey {
+		t.Fatalf("managed retirement arguments = %#v, want reserved app and marker", execution.args)
+	}
+}
+
+func assertManagedCredentialUpsert(
+	t *testing.T,
+	execution recordedBootstrapExecution,
+	credentials config.TenantBootstrapCredentials,
+) {
+	t.Helper()
+	if execution.args[2] != config.BootstrapTenantID ||
+		execution.args[3] != credentials.APIKey ||
+		execution.args[4] != credentials.Secret ||
+		execution.args[7] != tenantBootstrapManagedMarker {
+		t.Fatalf("managed upsert arguments = %#v, want current managed credential", execution.args)
+	}
+}
+
 func TestReconcileTenantBootstrapTransactionCreatesAndRotatesManagedCredential(t *testing.T) {
 	transaction := &fakeBootstrapTransaction{
 		rows: []bootstrapRowScanner{
@@ -128,35 +205,10 @@ func TestReconcileTenantBootstrapTransactionCreatesAndRotatesManagedCredential(t
 		t.Fatalf("execution count = %d, want app insert and three targeted auth writes", len(transaction.executions))
 	}
 
-	for _, execution := range transaction.executions {
-		if strings.Contains(execution.query, credentials.APIKey) ||
-			strings.Contains(execution.query, credentials.Secret) ||
-			strings.Contains(execution.query, config.LegacyTenantKey) ||
-			strings.Contains(execution.query, config.LegacyTenantSecret) {
-			t.Fatal("credential value was interpolated into SQL instead of passed as a parameter")
-		}
-	}
-
-	legacyDisable := transaction.executions[1]
-	if strings.Contains(legacyDisable.query, "app_id") {
-		t.Fatal("published legacy credential revocation must apply globally, not only to the reserved app")
-	}
-	if legacyDisable.args[1] != config.LegacyTenantKey || legacyDisable.args[2] != config.LegacyTenantSecret {
-		t.Fatalf("legacy disable arguments = %#v, want exact published pair", legacyDisable.args)
-	}
-	managedRetirement := transaction.executions[2]
-	if managedRetirement.args[1] != config.BootstrapTenantID ||
-		managedRetirement.args[2] != tenantBootstrapManagedMarker ||
-		managedRetirement.args[3] != credentials.APIKey {
-		t.Fatalf("managed retirement arguments = %#v, want reserved app and marker", managedRetirement.args)
-	}
-	upsert := transaction.executions[3]
-	if upsert.args[2] != config.BootstrapTenantID ||
-		upsert.args[3] != credentials.APIKey ||
-		upsert.args[4] != credentials.Secret ||
-		upsert.args[7] != tenantBootstrapManagedMarker {
-		t.Fatalf("managed upsert arguments = %#v, want current managed credential", upsert.args)
-	}
+	assertBootstrapQueriesDoNotInterpolateCredentials(t, transaction.executions, credentials)
+	assertLegacyCredentialRevocation(t, transaction.executions[1])
+	assertManagedCredentialRetirement(t, transaction.executions[2], credentials)
+	assertManagedCredentialUpsert(t, transaction.executions[3], credentials)
 }
 
 func TestReconcileTenantBootstrapTransactionRejectsOtherAppKeyCollision(t *testing.T) {
