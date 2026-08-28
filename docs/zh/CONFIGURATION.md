@@ -268,7 +268,15 @@
 | WORKFLOW_MYSQL_DB | 必填 | string | Workflow 模块使用的 MySQL 数据库名称 | workflow |
 | WORKFLOW_KAFKA_TOPIC | 必填 | string | Workflow 使用的 Kafka 主题名称 | spark-agent-builder |
 | RUNTIME_ENV | 必填 | string | 运行环境(dev/test/prod) | dev |
+| CODE_EXEC_TYPE | 使用默认值 | string | 代码节点隔离执行器。默认启用内置 LangChain/Pyodide 沙箱，无需外部服务或凭据；工作流启用 E2B 后优先使用 E2B；iFly、iFly-v2 为可选远程执行器。显式设为 `disabled` 可禁用代码节点，`local` 永不支持。 | langchain |
+| CODE_EXEC_TIMEOUT_SEC | 使用默认值 | int | 内置沙箱单次执行最长时间（限制为 1-600 秒） | 10 |
+| CODE_EXEC_MEMORY_LIMIT_MB | 使用默认值 | int | 内置 Pyodide V8 堆内存上限（限制为 128-2048 MB） | 256 |
 | WORKFLOW_INTERNAL_API_KEY | 自动生成 | secret | 用于可信内部调用访问 Workflow 特权接口；Compose 与 Helm 会自动生成并持久化，显式覆盖值需为 32-128 个安全字符 | 自动生成并持久化 |
+
+默认 `langchain` 执行器通过固定版本 Deno 启动官方 Pyodide WebAssembly
+沙箱，并关闭环境变量、宿主机文件、网络、子进程和 FFI 权限。E2B
+不是必需配置；工作流启用 E2B 后才会优先使用 E2B。用户代码不会在
+`core-workflow` 进程内执行，`local` 执行器不再支持。
 
 ---
 

@@ -35,6 +35,7 @@ import com.iflytek.astron.console.commons.response.ApiResult;
 import com.iflytek.astron.console.commons.security.WorkflowInternalApiKey;
 import com.iflytek.astron.console.commons.service.bot.BotMarketDataService;
 import com.iflytek.astron.console.commons.service.space.SpaceUserService;
+import com.iflytek.astron.console.commons.util.I18nUtil;
 import com.iflytek.astron.console.commons.util.RequestContextUtil;
 import com.iflytek.astron.console.commons.util.SseEmitterUtil;
 import com.iflytek.astron.console.commons.util.space.SpaceInfoUtil;
@@ -181,6 +182,18 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     public static final String PROTOCOL_BUILD_PATH = "/workflow/v1/protocol/build/";
     public static final String CODE_RUN_PATH = "/workflow/v1/run";
     public static final String CLONED_SUFFIX_PATTERN = "[(]\\d+[)]$";
+
+    /** Core workflow error code for a code node execution failure. */
+    private static final int CORE_CODE_EXECUTION_ERROR = 21600;
+    /** Core workflow error code for a code node execution timeout. */
+    private static final int CORE_CODE_EXECUTION_TIMEOUT_ERROR = 21603;
+    private static final String NODE_DEBUG_FAILED_MESSAGE_KEY = "workflow.node.debug.failed";
+    private static final String CODE_EXECUTION_FAILED_MESSAGE_KEY =
+            "workflow.code.execution.failed";
+    private static final String CODE_EXECUTION_TIMEOUT_MESSAGE_KEY =
+            "workflow.code.execution.timeout";
+    private static final String CODE_EXECUTOR_UNAVAILABLE_MESSAGE_KEY =
+            "workflow.code.executor.unavailable";
 
     private static final String JSON_KEY_BOT_ID = "botId";
     private static final String PUBLISH_SUCCESS = WorkflowConst.PublishResult.SUCCESS;
@@ -1582,7 +1595,10 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
                     nodeId,
                     responseBytes,
                     exception.getClass().getSimpleName());
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+            // A malformed response is still an upstream failure. Supply a controlled argument so
+            // the common.response.failed={0} template is resolved instead of leaking "{0}".
+            throw new BusinessException(
+                    ResponseEnum.RESPONSE_FAILED, nodeDebugFailureMessage(null));
         }
         log.info(
                 "node debug response, url = {}, flowId = {}, nodeId = {}, bodyBytes = {}, statusCode = {}",
@@ -1594,9 +1610,72 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         if (nodeDebugResponse == null
                 || nodeDebugResponse.getCode() == null
                 || nodeDebugResponse.getCode() != 0) {
-            throw new BusinessException(ResponseEnum.RESPONSE_FAILED);
+            // Core may include user-code tracebacks or runtime details in its message. Never
+            // expose that untrusted payload through the console API; map only the known error
+            // codes to localized, controlled messages. Passing the message as an argument also
+            // prevents common.response.failed={0} from leaking an unexpanded placeholder.
+            throw new BusinessException(
+                    ResponseEnum.RESPONSE_FAILED, nodeDebugFailureMessage(nodeDebugResponse));
         }
         return ApiResult.success(nodeDebugResponse.getData());
+    }
+
+    /**
+     * Convert a Core node-debug failure into a safe, localized user-facing message.
+     *
+     * <p>
+     * The Core response is not a trusted presentation boundary: code execution errors may contain
+     * arbitrary stderr/traceback text. This method intentionally returns only fixed resource-bundle
+     * messages and never includes {@link NodeDebugResponse#getMessage()}.
+     */
+    private String nodeDebugFailureMessage(NodeDebugResponse response) {
+        int code = response == null || response.getCode() == null
+                ? -1
+                : response.getCode();
+        String messageKey;
+        String fallback;
+        switch (code) {
+            case CORE_CODE_EXECUTION_TIMEOUT_ERROR -> {
+                messageKey = CODE_EXECUTION_TIMEOUT_MESSAGE_KEY;
+                fallback = "Code node execution timed out. Shorten the code or adjust the timeout.";
+            }
+            case CORE_CODE_EXECUTION_ERROR -> {
+                // An explicitly disabled executor and a user-code failure currently share the
+                // Core 21600 code. Use the dedicated setup hint only when Core supplies its
+                // controlled marker; never echo the upstream text itself.
+                if (isExecutorUnavailable(response)) {
+                    messageKey = CODE_EXECUTOR_UNAVAILABLE_MESSAGE_KEY;
+                    fallback = "No code execution environment is configured. Enable E2B or the built-in isolated executor.";
+                } else {
+                    messageKey = CODE_EXECUTION_FAILED_MESSAGE_KEY;
+                    fallback = "Code node execution failed. Check the code or execution environment.";
+                }
+            }
+            default -> {
+                messageKey = NODE_DEBUG_FAILED_MESSAGE_KEY;
+                fallback = "Workflow node debugging failed. Please check the node configuration.";
+            }
+        }
+        String localized = I18nUtil.getMessage(messageKey);
+        return StringUtils.equals(localized, messageKey) ? fallback : localized;
+    }
+
+    /**
+     * Identify the explicit no-executor marker emitted by Core without exposing its message.
+     *
+     * <p>
+     * Older Core versions collapse this condition into the generic 21600 message, so the check is
+     * deliberately best-effort and falls back to the neutral execution-failed copy.
+     */
+    private boolean isExecutorUnavailable(NodeDebugResponse response) {
+        String message = response == null ? null : response.getMessage();
+        if (StringUtils.isBlank(message)) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("no isolated code executor")
+                || normalized.contains("local code executor is disabled")
+                || normalized.contains("code execution environment is not configured");
     }
 
     /**

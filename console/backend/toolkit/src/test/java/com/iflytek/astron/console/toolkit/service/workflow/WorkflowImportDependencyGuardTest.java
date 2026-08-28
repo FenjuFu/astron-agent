@@ -370,6 +370,118 @@ class WorkflowImportDependencyGuardTest {
     }
 
     @Test
+    void nodeDebugMapsCodeFailureToControlledReadableMessage() {
+        Workflow workflow = executableWorkflow("flow-node-code-failure", emptyWorkflow());
+        when(workflowMapper.selectOne(any(Wrapper.class))).thenReturn(workflow);
+        when(appService.remoteCallAkSk("app-1"))
+                .thenReturn(new AkSk("api-key", "api-secret"));
+        WorkflowDebugDto request = codeNodeDebugRequest("flow-node-code-failure");
+        String sentinel = "Traceback: secret-runtime-value";
+        String response = new JSONObject()
+                .fluentPut("code", 21600)
+                .fluentPut("message", sentinel)
+                .toJSONString();
+
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            okHttp.when(() -> OkHttpUtil.post(
+                    eq("http://core/workflow/v1/node/debug/"), anyMap(), anyString()))
+                    .thenReturn(response);
+
+            assertThatThrownBy(() -> workflowService.nodeDebug("ifly-code::node", request))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(error -> {
+                        BusinessException exception = (BusinessException) error;
+                        assertThat(exception.getArgs())
+                                .containsExactly(
+                                        "Code node execution failed. Check the code or execution environment.");
+                        assertThat(exception.getMessage())
+                                .doesNotContain(sentinel)
+                                .doesNotContain("{0}");
+                    });
+        }
+    }
+
+    @Test
+    void nodeDebugMapsMalformedCoreResponseToControlledReadableMessage() {
+        Workflow workflow = executableWorkflow("flow-node-code-malformed", emptyWorkflow());
+        when(workflowMapper.selectOne(any(Wrapper.class))).thenReturn(workflow);
+        when(appService.remoteCallAkSk("app-1"))
+                .thenReturn(new AkSk("api-key", "api-secret"));
+        WorkflowDebugDto request = codeNodeDebugRequest("flow-node-code-malformed");
+        String sentinel = "malformed upstream traceback secret";
+
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            okHttp.when(() -> OkHttpUtil.post(
+                    eq("http://core/workflow/v1/node/debug/"), anyMap(), anyString()))
+                    .thenReturn(sentinel);
+
+            assertThatThrownBy(() -> workflowService.nodeDebug("ifly-code::node", request))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(error -> {
+                        BusinessException exception = (BusinessException) error;
+                        assertThat(exception.getArgs())
+                                .containsExactly(
+                                        "Workflow node debugging failed. Please check the node configuration.");
+                        assertThat(exception.getMessage())
+                                .doesNotContain(sentinel)
+                                .doesNotContain("{0}");
+                    });
+        }
+    }
+
+    @Test
+    void nodeDebugMapsCodeTimeoutAndExecutorUnavailableWithoutEchoingCoreMessage() {
+        Workflow workflow = executableWorkflow("flow-node-code-errors", emptyWorkflow());
+        when(workflowMapper.selectOne(any(Wrapper.class))).thenReturn(workflow);
+        when(appService.remoteCallAkSk("app-1"))
+                .thenReturn(new AkSk("api-key", "api-secret"));
+        WorkflowDebugDto request = codeNodeDebugRequest("flow-node-code-errors");
+
+        String timeoutResponse = new JSONObject()
+                .fluentPut("code", 21603)
+                .fluentPut("message", "timeout traceback secret")
+                .toJSONString();
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            okHttp.when(() -> OkHttpUtil.post(
+                    eq("http://core/workflow/v1/node/debug/"), anyMap(), anyString()))
+                    .thenReturn(timeoutResponse);
+
+            assertThatThrownBy(() -> workflowService.nodeDebug("ifly-code::node", request))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(error -> {
+                        BusinessException exception = (BusinessException) error;
+                        assertThat(exception.getArgs())
+                                .containsExactly(
+                                        "Code node execution timed out. Shorten the code or adjust the timeout.");
+                        assertThat(exception.getMessage())
+                                .doesNotContain("timeout traceback secret");
+                    });
+        }
+
+        String unavailableResponse = new JSONObject()
+                .fluentPut("code", 21600)
+                .fluentPut("message", "No isolated code executor is configured: secret")
+                .toJSONString();
+        try (MockedStatic<OkHttpUtil> okHttp = mockStatic(OkHttpUtil.class)) {
+            okHttp.when(() -> OkHttpUtil.post(
+                    eq("http://core/workflow/v1/node/debug/"), anyMap(), anyString()))
+                    .thenReturn(unavailableResponse);
+
+            assertThatThrownBy(() -> workflowService.nodeDebug("ifly-code::node", request))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(error -> {
+                        BusinessException exception = (BusinessException) error;
+                        assertThat(exception.getArgs())
+                                .containsExactly(
+                                        "No code execution environment is configured. Enable E2B or the built-in isolated executor.");
+                        assertThat(exception.getMessage())
+                                .doesNotContain("No isolated code executor is configured: secret")
+                                .doesNotContain("{0}");
+                    });
+        }
+    }
+
+    @Test
     void nodeDebugNeverForwardsClientSuppliedSandbox() {
         Workflow workflow = executableWorkflow("flow-node-sandbox", emptyWorkflow());
         when(workflowMapper.selectOne(any(Wrapper.class))).thenReturn(workflow);
@@ -1696,6 +1808,18 @@ class WorkflowImportDependencyGuardTest {
         BizWorkflowData workflow = new BizWorkflowData();
         workflow.setNodes(List.of(node));
         return workflow;
+    }
+
+    private WorkflowDebugDto codeNodeDebugRequest(String flowId) {
+        WorkflowDebugDto request = new WorkflowDebugDto();
+        request.setFlowId(flowId);
+        BizWorkflowData submitted = workflowWithNode(
+                "ifly-code::node", new JSONObject().fluentPut("appId", "app-1"));
+        submitted.setEdges(List.of());
+        submitted.getNodes().getFirst().getData().setInputs(List.of());
+        submitted.getNodes().getFirst().getData().setOutputs(List.of());
+        request.setData(submitted);
+        return request;
     }
 
     private BizWorkflowData agentWorkflow(JSONArray tools) {

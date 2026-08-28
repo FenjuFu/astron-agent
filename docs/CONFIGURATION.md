@@ -270,11 +270,16 @@ See the [Langfuse observability guide](/guide/observability) for privacy behavio
 | WORKFLOW_MYSQL_DB | Required | string | MySQL database name used by Workflow module | workflow |
 | WORKFLOW_KAFKA_TOPIC | Required | string | Kafka topic name used by Workflow | spark-agent-builder |
 | RUNTIME_ENV | Required | string | Runtime environment (dev/test/prod) | dev |
-| CODE_EXEC_TYPE | Required | string | Isolated code executor. The default is `disabled`; `local` is rejected. Configure E2B, iFly, iFly-v2, or the network-disabled LangChain sandbox before enabling code nodes. | disabled |
+| CODE_EXEC_TYPE | Use Default | string | Isolated code executor. The built-in LangChain/Pyodide sandbox is enabled by default and needs no external credentials. E2B is optional and takes priority when enabled for a workflow; iFly and iFly-v2 remain optional remote executors. `disabled` explicitly disables code nodes and `local` is rejected. | langchain |
+| CODE_EXEC_TIMEOUT_SEC | Use Default | int | Maximum built-in sandbox execution time in seconds (bounded to 1-600) | 10 |
+| CODE_EXEC_MEMORY_LIMIT_MB | Use Default | int | Maximum built-in Pyodide V8 heap in megabytes (bounded to 128-2048) | 256 |
 | WORKFLOW_INTERNAL_API_KEY | Auto-generated | secret | Authenticates trusted internal calls to privileged Workflow APIs. Compose and Helm generate and persist it; an optional explicit override must contain 32-128 safe characters. | generated and persisted |
 
-When no isolated executor is configured, code nodes fail closed. Running
-user-provided code inside the core-workflow process is not supported.
+The default `langchain` executor runs Python in the official Pyodide WebAssembly
+sandbox through a pinned Deno runtime. It has no environment, host-file,
+network, subprocess, or FFI permissions. E2B is optional; enabling it for a
+workflow makes that workflow use E2B first. Running user-provided code inside
+the core-workflow process (`local`) is not supported.
 
 ---
 
