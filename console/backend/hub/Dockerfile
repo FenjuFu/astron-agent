@@ -1,6 +1,15 @@
 FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /backend
 
+# Maven Resolver treats 429/503 responses as transient, but the default retry
+# budget is short for a concurrent multi-architecture build.  Keep the retry
+# policy in the build stage so a temporary Maven Central rate limit does not
+# fail the image, without affecting the runtime container.
+ENV MAVEN_ARGS="-Daether.connector.http.retryHandler.count=6 \
+-Daether.connector.http.retryHandler.interval=10000 \
+-Daether.connector.http.retryHandler.intervalMax=300000 \
+-Daether.connector.http.retryHandler.serviceUnavailable=429,503"
+
 COPY console/backend/pom.xml ./
 COPY console/backend/commons/pom.xml commons/pom.xml
 COPY console/backend/hub/pom.xml hub/pom.xml
