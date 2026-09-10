@@ -19,6 +19,19 @@ from workflow.extensions.otlp.log_trace.base import Usage
 from workflow.extensions.otlp.log_trace.node_log import NodeLog
 
 
+def _encode_legacy_trace_data(data: Any, depth: int = 0) -> Any:
+    """Preserve the depth-limited JSON representation expected by Console."""
+    if depth > 4 and not isinstance(data, str):
+        return json.dumps(data, ensure_ascii=False)
+
+    if isinstance(data, dict):
+        return {k: _encode_legacy_trace_data(v, depth + 1) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_encode_legacy_trace_data(item, depth + 1) for item in data]
+    else:
+        return data
+
+
 class Status(BaseModel):
     """
     Execution status information.
@@ -202,46 +215,32 @@ class WorkflowLog(BaseModel):
 
         :return: JSON string representation of the workflow log
         """
-        import sys
+        uploaded_values: dict[str, str] = {}
 
-        def is_large_string(s: str, limit: int = 5 * 1024) -> bool:
-            """
-            Check if a string exceeds the size limit for direct JSON inclusion.
-
-            :param s: String to check
-            :param limit: Size limit in bytes (default: 5KB)
-            :return: True if string exceeds limit, False otherwise
-            """
-            return isinstance(s, str) and sys.getsizeof(s.encode("utf-8")) > limit
-
-        def process_data(data: dict, depth: int = 0) -> Any:
-            """
-            Recursively process data structure to handle large strings.
-
-            :param data: Data structure to process
-            :param depth: Current depth of the data structure
-            :return: Processed data with large strings uploaded to OSS
-            """
-            if depth > 4 and not isinstance(data, str):
-                return json.dumps(data, ensure_ascii=False)
-
+        def externalize_large_strings(data: Any) -> Any:
+            """Handle large values before the legacy depth-limited encoding."""
             if isinstance(data, dict):
-                return {k: process_data(v, depth + 1) for k, v in data.items()}
-            elif isinstance(data, list):
-                return [process_data(item, depth + 1) for item in data]
-            elif isinstance(data, str):
-                if is_large_string(data):
-                    return get_oss_service().upload_file(
-                        f"{uuid.uuid4().hex}.txt",
-                        data.encode("utf-8"),
-                        bucket_name=os.getenv("OSS_BUCKET_NAME", "test"),
-                    )
-                else:
-                    return data
-            else:
-                return data
+                return {k: externalize_large_strings(v) for k, v in data.items()}
+            if isinstance(data, list):
+                return [externalize_large_strings(item) for item in data]
+            if isinstance(data, str):
+                encoded = data.encode("utf-8")
+                if len(encoded) > 5 * 1024:
+                    if data not in uploaded_values:
+                        uploaded_values[data] = get_oss_service().upload_file(
+                            f"{uuid.uuid4().hex}.txt",
+                            encoded,
+                            bucket_name=os.getenv("OSS_BUCKET_NAME", "test"),
+                        )
+                    return uploaded_values[data]
+            return data
 
-        result = process_data(self.model_dump(mode="json"))
+        # input_vars/output_vars entries become JSON strings at depth five.
+        # Visit their values first so the name/value wrappers stay readable by
+        # Console while large values no longer bypass object-storage offload.
+        result = _encode_legacy_trace_data(
+            externalize_large_strings(self.model_dump(mode="json"))
+        )
 
         def json_fallback(obj: Any) -> Any:
             """
