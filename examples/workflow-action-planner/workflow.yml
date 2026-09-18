@@ -1,0 +1,139 @@
+flowMeta:
+  name: Workflow Action Planner
+  description: Turns a goal or meeting note into a prioritized, owner-ready action checklist.
+  avatarIcon: https://oss-beijing-m8.openstorage.cn/SparkBotProd/icon/common/emojiitem_00_10@2x.png
+  avatarColor: '#FFEAD5'
+  advancedConfig: '{"prologue":{"enabled":true,"inputExample":["","",""]},"textToSpeech":{"enabled":true,"vcn_cn":"aisjiuxu","vcn_en":""}}'
+  category: 13
+  dslVersion: v1
+flowData:
+  nodes:
+  - id: node-start::d61b0f71-87ee-475e-93ba-f1607f0ce783
+    dragging: false
+    selected: false
+    width: 361
+    height: 89
+    position:
+      x: -83.10901960784315
+      y: 369.70866666666666
+    positionAbsolute:
+      x: -83.10901960784315
+      y: 369.70866666666666
+    type: custom
+    data:
+      allowInputReference: false
+      allowOutputReference: true
+      label: 开始
+      status: ''
+      nodeMeta:
+        aliasName: 开始节点
+        nodeType: 基础节点
+      inputs: [
+        ]
+      outputs:
+      - id: 0918514b-72a8-4646-8dd9-ff4a8fc26d44
+        name: AGENT_USER_INPUT
+        nameErrMsg: ''
+        schema:
+          type: string
+          default: 用户本轮对话输入内容
+        required: true
+        deleteDisabled: true
+      nodeParam: {
+        }
+      icon: https://oss-beijing-m8.openstorage.cn/pro-bucket/sparkBot/common/workflow/icon/start-node-icon.png
+      description: 工作流的开启节点，用于定义流程调用所需的业务变量信息。
+      updatable: false
+  - id: node-end::cda617af-551e-462e-b3b8-3bb9a041bf88
+    dragging: false
+    selected: true
+    width: 361
+    height: 129
+    position:
+      x: 886.8833333333332
+      y: 343.91588235294114
+    positionAbsolute:
+      x: 886.8833333333332
+      y: 343.91588235294114
+    type: custom
+    data:
+      allowInputReference: true
+      allowOutputReference: false
+      label: 结束
+      references: [
+        ]
+      status: ''
+      nodeMeta:
+        aliasName: 结束节点
+        nodeType: 基础节点
+      inputs:
+      - id: 82de2b42-a059-4c98-bffb-b6b4800fcac9
+        name: output
+        nameErrMsg: ''
+        schema:
+          type: string
+          value:
+            type: ref
+            content:
+              id: aa02732f-6026-4219-a60c-cc4e0708ef22
+              nodeId: spark-llm::39a4a107-44fd-4eb9-93e3-320511ec65e2
+              name: output
+            contentErrMsg: ''
+        fileType: ''
+      outputs: [
+        ]
+      nodeParam:
+        template: |+
+          Turn the user's goal or meeting notes into a concise action checklist.
+
+          {{input}}
+
+          Return: (1) a short summary, (2) prioritized actions with an owner and due-date placeholder when missing, and (3) open questions.
+
+        respFormat: 0
+        appId: YOUR_APP_ID
+        uid: ab896e82-2ab7-42a4-8d14-570386b3e904
+        enableChatHistoryV2:
+          isEnabled: false
+          rounds: 1
+        templateErrMsg: ''
+        llmId: 454665064
+        domain: xminimaxm2
+        serviceId: xminimaxm2
+        url: https://maas-api.cn-huabei-1.xf-yun.com/v1/chat/completions
+        modelId: 3
+        isThink: false
+        multiMode: false
+        modelName: m2
+        modelEnabled: true
+        llmIdErrMsg: ''
+        source: openai
+        extraParams:
+          temperature: 1
+        systemTemplate: |+
+          You are a practical workflow planning assistant. Extract concrete actions from the user's notes without inventing facts.
+          Group related work, order actions by dependency and urgency, and mark unknown owners or dates as TBD.
+          Keep the answer concise and use Markdown checkboxes so it can be copied into a task tracker.
+
+      icon: https://oss-beijing-m8.openstorage.cn/pro-bucket/sparkBot/common/workflow/icon/largeModelIcon.png
+      description: 根据输入的提示词，调用选定的大模型，对提示词作出回答
+      updatable: false
+  edges:
+  - source: node-start::d61b0f71-87ee-475e-93ba-f1607f0ce783
+    target: spark-llm::39a4a107-44fd-4eb9-93e3-320511ec65e2
+    type: customEdge
+    id: reactflow__edge-node-start::d61b0f71-87ee-475e-93ba-f1607f0ce783-spark-llm::39a4a107-44fd-4eb9-93e3-320511ec65e2
+    markerEnd:
+      type: arrow
+      color: '#6356EA'
+    data:
+      edgeType: curve
+  - source: spark-llm::39a4a107-44fd-4eb9-93e3-320511ec65e2
+    target: node-end::cda617af-551e-462e-b3b8-3bb9a041bf88
+    type: customEdge
+    id: reactflow__edge-spark-llm::39a4a107-44fd-4eb9-93e3-320511ec65e2-node-end::cda617af-551e-462e-b3b8-3bb9a041bf88
+    markerEnd:
+      type: arrow
+      color: '#6356EA'
+    data:
+      edgeType: curve
