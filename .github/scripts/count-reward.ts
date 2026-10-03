@@ -67,4 +67,5 @@ await $`git push origin ${tagName} --no-verify`;
 await $`git config unset user.name`;
 await $`git config unset user.email`;
 
-await $`gh release create ${tagName} --notes ${summaryText}`;
+// Keep "Latest" pointing at the newest vX.Y.Z product release
+await $`gh release create ${tagName} --latest=false --notes ${summaryText}`;
