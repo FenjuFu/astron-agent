@@ -1,6 +1,7 @@
 import { changeMonth, formatDate, makeDateRange } from "npm:web-utility";
 import { $, YAML } from "npm:zx";
 
+import { createDetachedCommit } from "./git.ts";
 import { Reward } from "./type.ts";
 
 $.verbose = true;
@@ -61,7 +62,8 @@ const tagName = `statistic-${new Date().toJSON().slice(0, 7)}`;
 await $`git config user.name "github-actions[bot]"`;
 await $`git config user.email "github-actions[bot]@users.noreply.github.com"`;
 
-await $`git tag -a ${tagName} $(git rev-parse HEAD) -m ${summaryText}`;
+const tagTarget = await createDetachedCommit(tagName);
+await $`git tag -a ${tagName} ${tagTarget} -m ${summaryText}`;
 await $`git push origin ${tagName} --no-verify`;
 
 await $`git config unset user.name`;
