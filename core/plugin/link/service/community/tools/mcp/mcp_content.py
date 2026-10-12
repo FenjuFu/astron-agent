@@ -8,11 +8,11 @@ instead of being dropped silently.
 import json
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from plugin.link.api.schemas.community.tools.mcp.mcp_tools_schema import (
     MCPCallToolData,
-    MCPContentBlock,
+    MCPContent,
     MCPResultTruncation,
 )
 from pydantic import TypeAdapter
@@ -22,13 +22,21 @@ MAX_BYTES_ENV = "MCP_TOOL_RESULT_MAX_BYTES"
 DEFAULT_MAX_BLOCKS = 128
 DEFAULT_MAX_BYTES = 4 * 1024 * 1024
 
+LimitReason = Literal["max_blocks", "max_bytes"]
+
 _CONTENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(
     MCPCallToolData.model_fields["content"].annotation
 )
 
 
+class ResultLimitError(ValueError):
+    """The configured byte limit cannot hold an explicit result status."""
+
+
 @dataclass(frozen=True)
 class ResultLimits:
+    """Limits for the complete serialized response data, excluding its envelope."""
+
     max_blocks: int
     max_bytes: int
 
@@ -52,7 +60,9 @@ def _positive_int_env(name: str, default: int) -> int:
 
 
 def _json_size(value: Any) -> int:
-    encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+    encoded = json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
     return len(encoded.encode("utf-8"))
 
 
@@ -70,58 +80,90 @@ def _dump_result(result: Any) -> dict[str, Any]:
     return dumped if isinstance(dumped, dict) else {}
 
 
+def _take_value(value: Any, budget: int) -> tuple[Any, int, bool]:
+    if value is None:
+        return None, budget, False
+    size = _json_size(value)
+    if size > budget:
+        return None, budget, True
+    return value, budget - size, False
+
+
+def _take_blocks(
+    raw_blocks: list[Any], budget: int, limits: ResultLimits
+) -> tuple[list[MCPContent], int, LimitReason | None]:
+    kept: list[MCPContent] = []
+    for raw_block in raw_blocks:
+        if len(kept) >= limits.max_blocks:
+            return kept, budget, "max_blocks"
+        block = _CONTENT_ADAPTER.validate_python(
+            [_with_legacy_fields(dict(raw_block))]
+        )[0]
+        # Count the public shape, including compatibility and unsupported fields.
+        size = _json_size(_dump_result(block))
+        if size > budget:
+            return kept, budget, "max_bytes"
+        budget -= size
+        kept.append(block)
+    return kept, budget, None
+
+
+def _fit_serialized_result(
+    data: MCPCallToolData, truncation: MCPResultTruncation, limits: ResultLimits
+) -> MCPCallToolData:
+    # Match the route's JSON encoding, including aliases, UTF-8, containers and
+    # the truncation object itself. Low-priority metadata is discarded first.
+    if _json_size(_dump_result(data)) <= limits.max_bytes:
+        return data
+    data.truncation = truncation
+    truncation.reason = "max_bytes"
+    if data.meta is not None:
+        data.meta = None
+        truncation.metaOmitted = True
+    while data.content and _json_size(_dump_result(data)) > limits.max_bytes:
+        data.content.pop()
+        truncation.returnedBlockCount = len(data.content)
+    if _json_size(_dump_result(data)) > limits.max_bytes:
+        truncation.structuredContentOmitted |= data.structuredContent is not None
+        data.structuredContent = None
+    if _json_size(_dump_result(data)) > limits.max_bytes:
+        raise ResultLimitError(
+            "MCP tool result byte limit cannot hold truncation metadata"
+        )
+    return data
+
+
 def build_call_tool_data(
     result: Any, limits: ResultLimits | None = None
 ) -> MCPCallToolData:
-    """Build the public tool result, bounded by ``limits``.
+    """Bound the final UTF-8 JSON data, including truncation and public fields.
 
-    ``structuredContent`` is budgeted first because it is the authoritative
-    machine-readable result; content blocks follow in order until the block
-    count or byte budget is exhausted.
+    Keep authoritative ``structuredContent`` first, then content blocks in
+    order, then top-level ``_meta``. If even the omission status cannot fit,
+    fail explicitly rather than return an oversized successful result.
     """
     limits = limits or ResultLimits.from_env()
     raw = _dump_result(result)
     raw_blocks = list(raw.get("content") or [])
-    budget = limits.max_bytes
-
-    structured = raw.get("structuredContent")
-    structured_omitted = False
-    if structured is not None:
-        size = _json_size(structured)
-        if size > budget:
-            structured, structured_omitted = None, True
-        else:
-            budget -= size
-
-    kept: list[dict[str, Any]] = []
-    reason: str | None = "max_bytes" if structured_omitted else None
-    for raw_block in raw_blocks:
-        if len(kept) >= limits.max_blocks:
-            reason = "max_blocks"
-            break
-        size = _json_size(raw_block)
-        if size > budget:
-            reason = "max_bytes"
-            break
-        budget -= size
-        kept.append(_with_legacy_fields(dict(raw_block)))
-
-    truncation = None
-    if reason is not None:
-        truncation = MCPResultTruncation(
-            reason=reason,
-            maxBlocks=limits.max_blocks,
-            maxBytes=limits.max_bytes,
-            originalBlockCount=len(raw_blocks),
-            returnedBlockCount=len(kept),
-            structuredContentOmitted=structured_omitted,
-        )
-
-    content: list[MCPContentBlock] = _CONTENT_ADAPTER.validate_python(kept)
-    return MCPCallToolData(
+    structured, budget, structured_omitted = _take_value(
+        raw.get("structuredContent"), limits.max_bytes
+    )
+    content, budget, reason = _take_blocks(raw_blocks, budget, limits)
+    meta, _, meta_omitted = _take_value(raw.get("_meta"), budget)
+    truncation = MCPResultTruncation(
+        reason=reason or "max_bytes",
+        maxBlocks=limits.max_blocks,
+        maxBytes=limits.max_bytes,
+        originalBlockCount=len(raw_blocks),
+        returnedBlockCount=len(content),
+        structuredContentOmitted=structured_omitted,
+        metaOmitted=meta_omitted,
+    )
+    data = MCPCallToolData(
         isError=bool(raw.get("isError")),
         content=content,
         structuredContent=structured,
-        meta=raw.get("_meta"),
-        truncation=truncation,
+        _meta=meta,
+        truncation=truncation if reason or structured_omitted or meta_omitted else None,
     )
+    return _fit_serialized_result(data, truncation, limits)

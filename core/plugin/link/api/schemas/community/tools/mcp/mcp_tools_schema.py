@@ -194,10 +194,19 @@ class MCPResultTruncation(BaseModel):
 
     reason: Literal["max_blocks", "max_bytes"]
     maxBlocks: int
-    maxBytes: int
+    maxBytes: int = Field(
+        description=(
+            "UTF-8 byte limit for the complete JSON data, including truncation; "
+            "excludes the outer code/message/sid envelope. Limits too small for "
+            "truncation return a call error with empty data."
+        )
+    )
     originalBlockCount: int
     returnedBlockCount: int
     structuredContentOmitted: bool = False
+    metaOmitted: bool = Field(
+        default=False, description="Whether the top-level _meta was withheld."
+    )
 
 
 class MCPCallToolData(BaseModel):

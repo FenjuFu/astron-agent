@@ -35,7 +35,10 @@ from plugin.link.consts import const
 from plugin.link.domain.models.manager import get_db_engine
 from plugin.link.infra.kafka_telemetry import send_telemetry_sync
 from plugin.link.infra.tool_crud.process import ToolCrudOperation
-from plugin.link.service.community.tools.mcp.mcp_content import build_call_tool_data
+from plugin.link.service.community.tools.mcp.mcp_content import (
+    ResultLimitError,
+    build_call_tool_data,
+)
 from plugin.link.service.community.tools.mcp.mcp_transport import (
     MCPTransportError,
     initialized_mcp_session,
@@ -285,12 +288,16 @@ async def _execute_tool_call(
                 f"tool={tool_name}, truncation={data.truncation.model_dump()}"
             )
         return data
-    except Exception:
+    except Exception as error:
         err = ErrCode.MCP_SERVER_CALL_TOOL_ERR
         span_context.add_error_event(err.msg)
         span_context.set_status(OTelStatus(StatusCode.ERROR))
         _log_error_to_kafka(err, node_trace, mcp_server_id, m)
-        return _create_error_response(err, session_id)
+        response = _create_error_response(err, session_id)
+        if isinstance(error, ResultLimitError):
+            response.message = str(error)
+            logger.warning(response.message)
+        return response
 
 
 async def _call_mcp_tool(
